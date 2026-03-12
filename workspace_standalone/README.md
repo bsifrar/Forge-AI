@@ -2,53 +2,57 @@
 
 Persistent AI Workspace
 
-Goals:
-- no direct imports from Synapse runtime modules
-- separate storage and settings
-- optional HTTP adapter back into Synapse
-- safe to iterate without destabilizing the main platform
+Vector is the isolated browser and terminal workspace extracted from SynapseLabPro.
 
-This runtime now has its own:
-- `workspace_standalone/.venv`
-- `workspace_standalone/.runtime_logs`
-- `workspace_standalone/scripts/*`
+It does not start, stop, or own Synapse. If you want Synapse-backed memory, run Synapse separately and point Vector at it over HTTP.
 
-Install its environment:
+## Install
 
 ```bash
+cd /Users/briansifrar/SynapseWorkspaceStandalone
 ./workspace_standalone/scripts/install.sh
 ```
 
-Start it without Synapse:
+## Configure
+
+Copy `.env.example` to `.env` if you want stable local defaults.
+
+Key env vars:
+- `WORKSPACE_ADAPTER_MODE=null|synapse`
+- `WORKSPACE_SYNAPSE_BASE_URL=http://127.0.0.1:8080`
+- `WORKSPACE_OPENAI_API_KEY=...`
+- `WORKSPACE_MODEL=gpt-5.4`
+
+## Run Without Synapse
 
 ```bash
 export WORKSPACE_ADAPTER_MODE=null
 ./workspace_standalone/scripts/start.sh
 ```
 
-Start it with Synapse as an external dependency:
+## Run With Synapse As External Dependency
 
 ```bash
 export WORKSPACE_ADAPTER_MODE=synapse
 export WORKSPACE_SYNAPSE_BASE_URL=http://127.0.0.1:8080
+export WORKSPACE_OPENAI_API_KEY=...
 ./workspace_standalone/scripts/start.sh
 ```
 
-Stop it:
+## Stop
 
 ```bash
 ./workspace_standalone/scripts/stop.sh
 ```
 
-Check status:
+## Status
 
 ```bash
 ./workspace_standalone/scripts/status.sh
 ```
 
-Terminal client:
+## Smoke Test
 
 ```bash
-source workspace_standalone/.venv/bin/activate
-PYTHONPATH=/Users/briansifrar/SynapseWorkspaceStandalone python -m workspace_standalone.workspace_terminal.app create-session synapse --title "Test"
+./workspace_standalone/scripts/smoke_test.sh
 ```

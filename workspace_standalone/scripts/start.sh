@@ -7,6 +7,12 @@ REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
 LOG_DIR="${WORKSPACE_STACK_LOG_DIR:-$ROOT_DIR/.runtime_logs}"
 mkdir -p "$LOG_DIR"
 
+if [[ -f "$ROOT_DIR/.env" ]]; then
+    set -a
+    source "$ROOT_DIR/.env"
+    set +a
+fi
+
 WORKSPACE_HOST="${WORKSPACE_HOST:-127.0.0.1}"
 WORKSPACE_PORT="${WORKSPACE_PORT:-8091}"
 WORKSPACE_ADAPTER_MODE="${WORKSPACE_ADAPTER_MODE:-null}"
@@ -31,15 +37,14 @@ fi
 
 if [[ "$WORKSPACE_ADAPTER_MODE" == "synapse" ]]; then
     echo "Checking external Synapse dependency at $WORKSPACE_SYNAPSE_BASE_URL ..."
-    if ! curl -fsS "$WORKSPACE_SYNAPSE_BASE_URL/" >/dev/null 2>&1 || \
-       ! curl -fsS "$WORKSPACE_SYNAPSE_BASE_URL/smb/status" >/dev/null 2>&1; then
+    if ! curl -fsS "$WORKSPACE_SYNAPSE_BASE_URL/" >/dev/null 2>&1 ||        ! curl -fsS "$WORKSPACE_SYNAPSE_BASE_URL/smb/status" >/dev/null 2>&1; then
         echo "Synapse is not healthy at $WORKSPACE_SYNAPSE_BASE_URL"
         echo "Start Synapse separately, or set WORKSPACE_ADAPTER_MODE=null"
         exit 1
     fi
 fi
 
-echo "Starting workspace standalone on $WORKSPACE_HOST:$WORKSPACE_PORT ..."
+echo "Starting Vector on $WORKSPACE_HOST:$WORKSPACE_PORT ..."
 (
     export PYTHONPATH="$REPO_ROOT"
     export WORKSPACE_HOST
@@ -47,6 +52,10 @@ echo "Starting workspace standalone on $WORKSPACE_HOST:$WORKSPACE_PORT ..."
     export WORKSPACE_ADAPTER_MODE
     export WORKSPACE_SYNAPSE_BASE_URL
     export WORKSPACE_MODEL
+    export WORKSPACE_DAILY_CAP
+    export WORKSPACE_HOURLY_CAP
+    export WORKSPACE_INPUT_PRICE
+    export WORKSPACE_OUTPUT_PRICE
     export WORKSPACE_OPENAI_API_KEY="${WORKSPACE_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}"
     cd "$REPO_ROOT"
     source "$ROOT_DIR/.venv/bin/activate"
@@ -71,15 +80,10 @@ fi
 cd "$REPO_ROOT"
 source "$ROOT_DIR/.venv/bin/activate"
 export PYTHONPATH="$REPO_ROOT"
-python -m workspace_standalone.workspace_terminal.app settings \
-  --api-enabled true \
-  --model "$WORKSPACE_MODEL" \
-  --daily-cap "$WORKSPACE_DAILY_CAP" \
-  --hourly-cap "$WORKSPACE_HOURLY_CAP" \
-  --input-price "$WORKSPACE_INPUT_PRICE" \
-  --output-price "$WORKSPACE_OUTPUT_PRICE" >/dev/null
+python -m workspace_standalone.workspace_terminal.app settings   --api-enabled true   --model "$WORKSPACE_MODEL"   --daily-cap "$WORKSPACE_DAILY_CAP"   --hourly-cap "$WORKSPACE_HOURLY_CAP"   --input-price "$WORKSPACE_INPUT_PRICE"   --output-price "$WORKSPACE_OUTPUT_PRICE" >/dev/null
 
 echo "Vector is ready."
 echo "UI:   http://${WORKSPACE_HOST}:${WORKSPACE_PORT}/"
 echo "Logs: $LOG_DIR"
 echo "Mode: $WORKSPACE_ADAPTER_MODE"
+echo "PID:  $WORKSPACE_PID"

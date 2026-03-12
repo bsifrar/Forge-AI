@@ -2,6 +2,14 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [[ -f "$ROOT_DIR/.env" ]]; then
+    set -a
+    source "$ROOT_DIR/.env"
+    set +a
+fi
+
 WORKSPACE_HOST="${WORKSPACE_HOST:-127.0.0.1}"
 WORKSPACE_PORT="${WORKSPACE_PORT:-8091}"
 WORKSPACE_ADAPTER_MODE="${WORKSPACE_ADAPTER_MODE:-null}"
@@ -20,9 +28,9 @@ fetch() {
 }
 
 echo "Vector Status"
-echo "Vector host: $WORKSPACE_HOST"
-echo "Vector port: $WORKSPACE_PORT"
-echo "Adapter mode:    $WORKSPACE_ADAPTER_MODE"
+echo "Vector host:   $WORKSPACE_HOST"
+echo "Vector port:   $WORKSPACE_PORT"
+echo "Adapter mode:  $WORKSPACE_ADAPTER_MODE"
 echo ""
 
 if [[ "$WORKSPACE_ADAPTER_MODE" == "synapse" ]]; then
