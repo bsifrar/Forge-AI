@@ -49,6 +49,18 @@ class SessionStatusUpdateRequest(BaseModel):
     status: str = Field(pattern="^(active|archived)$")
 
 
+class BootstrapSetupRequest(BaseModel):
+    adapter_mode: str = Field(pattern="^(null|external)$")
+    external_base_url: str | None = Field(default=None)
+    api_enabled: bool = Field(default=True)
+    selected_model: str = Field(min_length=1)
+    daily_spend_cap_usd: float = Field(default=20.0, ge=0.0)
+    hourly_call_cap: int = Field(default=30, ge=0)
+    price_input_per_1m_usd: float = Field(default=0.0, ge=0.0)
+    price_output_per_1m_usd: float = Field(default=0.0, ge=0.0)
+    api_key: str | None = Field(default=None)
+
+
 class EventListResponse(BaseModel):
     session_id: str | None = Field(default=None)
     count: int

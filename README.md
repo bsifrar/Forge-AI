@@ -1,41 +1,29 @@
 # Workspace-AI
 
-This is the isolated browser and terminal Workspace application.
+Standalone Workspace product.
 
-It does not start, stop, or own any external runtime. If you want external-service-backed memory, run that service separately and point this app at it over HTTP.
+## Main entrypoint
 
-## Install
-
-```bash
-cd /Users/briansifrar/Workspace-AI
-./workspace_ai/scripts/install.sh
-```
-
-Use `.env.workspace` for non-secret config and `.env.workspace.secret` for local secrets.
-
-## Run Without External Memory Service
+Use the root launcher:
 
 ```bash
 cd /Users/briansifrar/Workspace-AI
-./workspace_ai/scripts/start.sh
+./workspace.sh start
 ```
 
-## Run With External Memory Service
-
-Set these in `.env.workspace`:
-
-- `WORKSPACE_ADAPTER_MODE=external`
-- `WORKSPACE_EXTERNAL_BASE_URL=http://127.0.0.1:8080`
-
-Then run:
+Other commands:
 
 ```bash
-cd /Users/briansifrar/Workspace-AI
-./workspace_ai/scripts/start.sh
+./workspace.sh install
+./workspace.sh stop
+./workspace.sh status
+./workspace.sh smoke
+./workspace.sh secrets
 ```
 
-## Stop
+Config lives at the repo root:
 
-```bash
-./workspace_ai/scripts/stop.sh
-```
+- `.env.workspace`
+- `.env.workspace.secret`
+
+The UI includes a first-run wizard that can write those files for you.

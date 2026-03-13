@@ -10,32 +10,39 @@ workspace_project_root() {
     cd "$(workspace_app_root)/.." && pwd
 }
 
+_load_workspace_file() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+        local line key value
+        line="${raw_line#${raw_line%%[![:space:]]*}}"
+        [[ -z "$line" || "$line" == \\#* || "$line" != *=* ]] && continue
+        key="${line%%=*}"
+        value="${line#*=}"
+        key="${key//[[:space:]]/}"
+        value="${value#\"}"
+        value="${value%\"}"
+        value="${value#\'}"
+        value="${value%\'}"
+        if [[ -z "${!key:-}" ]]; then
+            export "$key=$value"
+        fi
+    done < "$file"
+}
+
 load_workspace_env() {
     local project_root app_root
     app_root="$(workspace_app_root)"
     project_root="$(workspace_project_root)"
 
-    if [[ -f "$project_root/.env.workspace" ]]; then
-        set -a
-        source "$project_root/.env.workspace"
-        set +a
-    fi
+    _load_workspace_file "$project_root/.env.workspace"
+    _load_workspace_file "$project_root/.env.workspace.secret"
 
-    if [[ -f "$project_root/.env.workspace.secret" ]]; then
-        set -a
-        source "$project_root/.env.workspace.secret"
-        set +a
-    fi
-
-    # Legacy fallback during transition only.
     if [[ -f "$app_root/.env" ]]; then
-        set -a
-        source "$app_root/.env"
-        set +a
+        _load_workspace_file "$app_root/.env"
     fi
 
     if [[ -n "${WORKSPACE_API_KEY:-}" && -z "${WORKSPACE_OPENAI_API_KEY:-}" ]]; then
         export WORKSPACE_OPENAI_API_KEY="$WORKSPACE_API_KEY"
     fi
-
 }

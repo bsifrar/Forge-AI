@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 
-from workspace_ai.workspace_api.models import ChatGPTImportRequest, CloneSessionRequest, EventListResponse, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
+from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, EventListResponse, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
 from workspace_ai.workspace_api.streaming import encode_sse_stream
 from workspace_ai.workspace_runtime.session_manager import SessionManager
 
@@ -26,6 +26,10 @@ def build_router(manager: SessionManager) -> APIRouter:
     @router.post("/settings")
     def update_settings(request: SettingsUpdateRequest) -> dict:
         return manager.update_settings(request.model_dump())
+
+    @router.post("/setup/bootstrap")
+    def bootstrap_setup(request: BootstrapSetupRequest) -> dict:
+        return manager.bootstrap_local_setup(request.model_dump())
 
     @router.post("/sessions")
     def create_session(request: SessionCreateRequest) -> dict:

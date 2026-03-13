@@ -314,6 +314,49 @@
     .toast.error {
       background: rgba(141,74,22,0.96);
     }
+
+    .wizard-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(31,29,24,0.42);
+      backdrop-filter: blur(10px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 30;
+    }
+    .wizard-overlay.visible { display: flex; }
+    .wizard-card {
+      width: min(780px, 100%);
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: 0 30px 60px rgba(31,29,24,0.18);
+      padding: 24px;
+      display: grid;
+      gap: 18px;
+    }
+    .wizard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .wizard-grid .full { grid-column: 1 / span 2; }
+    .wizard-choice {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      background: white;
+      cursor: pointer;
+    }
+    .wizard-choice.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
     @media (max-width: 1320px) {
       .shell { grid-template-columns: minmax(280px, 320px) minmax(0, 1fr); }
       .inspector {
@@ -351,7 +394,7 @@
         <div class="panel">
           <div class="toolbar">
             <h2>Settings</h2>
-            <button class="secondary" onclick="runFirstRunSetup()">First-Run Setup</button>
+            <button class="secondary" onclick="openSetupWizard()">First-Run Wizard</button>
           </div>
           <div class="settings-grid">
             <select id="apiEnabled">
@@ -384,7 +427,7 @@
             <span id="sessionCount" class="pill">0</span>
           </div>
           <div class="create-row" style="margin-bottom: 12px;">
-            <input id="projectId" value="external" placeholder="Project ID" />
+            <input id="projectId" value="workspace" placeholder="Project ID" />
             <input id="sessionTitle" placeholder="Session title" />
             <button onclick="createSession()">Create Session</button>
           </div>
@@ -406,7 +449,7 @@
           <h2>Import ChatGPT</h2>
           <div class="create-row">
             <div class="field-label">Project</div>
-            <input id="importProjectId" value="external" placeholder="Project ID" />
+            <input id="importProjectId" value="workspace" placeholder="Project ID" />
             <div class="field-label">Chat export file</div>
             <input id="importFile" type="file" accept=".json,application/json" multiple />
             <div class="help-text">Choose one or more `conversations-*.json` files from your ChatGPT export folder. Start with `conversations-000.json`, or select all of them at once.</div>
@@ -486,6 +529,63 @@
       </div>
     </aside>
   </div>
+  
+  <div id="setupWizard" class="wizard-overlay" aria-hidden="true">
+    <div class="wizard-card">
+      <div class="toolbar">
+        <div>
+          <h2>Workspace Setup</h2>
+          <p class="muted">Create local config files and finish first-run setup without leaving the app.</p>
+        </div>
+        <button class="secondary" onclick="closeSetupWizard()">Close</button>
+      </div>
+      <div class="wizard-grid">
+        <button id="wizardChoiceNull" class="wizard-choice active" onclick="setWizardMode('null')">
+          <strong>Local Only</strong><br />
+          <span class="muted">Use Workspace without an external memory service.</span>
+        </button>
+        <button id="wizardChoiceExternal" class="wizard-choice" onclick="setWizardMode('external')">
+          <strong>External Memory</strong><br />
+          <span class="muted">Connect Workspace to an external service over HTTP.</span>
+        </button>
+        <div class="full">
+          <div class="field-label">External base URL</div>
+          <input id="wizardExternalBaseUrl" placeholder="http://127.0.0.1:8080" />
+        </div>
+        <div>
+          <div class="field-label">Model</div>
+          <input id="wizardModel" placeholder="gpt-5.4" />
+        </div>
+        <div>
+          <div class="field-label">Workspace API key</div>
+          <input id="wizardApiKey" type="password" placeholder="Stored locally in .env.workspace.secret" />
+        </div>
+        <div>
+          <div class="field-label">Daily cap</div>
+          <input id="wizardDailyCap" type="number" step="0.01" />
+        </div>
+        <div>
+          <div class="field-label">Hourly cap</div>
+          <input id="wizardHourlyCap" type="number" step="1" />
+        </div>
+        <div>
+          <div class="field-label">Input price / 1M</div>
+          <input id="wizardInputPrice" type="number" step="0.01" />
+        </div>
+        <div>
+          <div class="field-label">Output price / 1M</div>
+          <input id="wizardOutputPrice" type="number" step="0.01" />
+        </div>
+      </div>
+      <div class="help-text">This writes <code>.env.workspace</code> and, if provided, <code>.env.workspace.secret</code> in the Workspace-AI root.</div>
+      <div id="wizardStatus" class="help-text"></div>
+      <div class="toolbar-actions">
+        <button onclick="bootstrapSetup()">Apply Setup</button>
+        <button class="secondary" onclick="prefillWizardFromSettings()">Reset To Current Values</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" aria-live="polite"></div>
   <script>
     const state = {
@@ -498,6 +598,7 @@
       sidebarTab: "control",
       currentSession: null,
       messageSearch: "",
+      wizardMode: "null",
     };
 
     async function api(path, options = {}) {
@@ -644,6 +745,79 @@
         showToast(successMessage);
       } catch (error) {
         showToast(`Copy failed: ${error.message}`, "error");
+      }
+    }
+
+
+    function setWizardMode(mode) {
+      state.wizardMode = mode;
+      document.getElementById("wizardChoiceNull").classList.toggle("active", mode === "null");
+      document.getElementById("wizardChoiceExternal").classList.toggle("active", mode === "external");
+      document.getElementById("wizardExternalBaseUrl").disabled = mode !== "external";
+    }
+
+    function prefillWizardFromSettings() {
+      const settings = state.settings || {};
+      const mode = settings.adapter_mode || state.status?.adapter?.adapter_mode || "null";
+      setWizardMode(mode);
+      document.getElementById("wizardExternalBaseUrl").value = settings.external_base_url || "http://127.0.0.1:8080";
+      document.getElementById("wizardModel").value = settings.selected_model || "gpt-5.4";
+      document.getElementById("wizardApiKey").value = "";
+      document.getElementById("wizardDailyCap").value = settings.daily_spend_cap_usd ?? 20;
+      document.getElementById("wizardHourlyCap").value = settings.hourly_call_cap ?? 30;
+      document.getElementById("wizardInputPrice").value = settings.price_input_per_1m_usd ?? 0;
+      document.getElementById("wizardOutputPrice").value = settings.price_output_per_1m_usd ?? 0;
+      document.getElementById("wizardStatus").textContent = "";
+    }
+
+    function openSetupWizard() {
+      prefillWizardFromSettings();
+      const node = document.getElementById("setupWizard");
+      node.classList.add("visible");
+      node.setAttribute("aria-hidden", "false");
+    }
+
+    function closeSetupWizard() {
+      const node = document.getElementById("setupWizard");
+      node.classList.remove("visible");
+      node.setAttribute("aria-hidden", "true");
+    }
+
+    async function bootstrapSetup() {
+      const statusEl = document.getElementById("wizardStatus");
+      const payload = {
+        adapter_mode: state.wizardMode || "null",
+        external_base_url: document.getElementById("wizardExternalBaseUrl").value.trim() || "http://127.0.0.1:8080",
+        api_enabled: true,
+        selected_model: document.getElementById("wizardModel").value.trim() || "gpt-5.4",
+        daily_spend_cap_usd: Number(document.getElementById("wizardDailyCap").value || 20),
+        hourly_call_cap: Number(document.getElementById("wizardHourlyCap").value || 30),
+        price_input_per_1m_usd: Number(document.getElementById("wizardInputPrice").value || 0),
+        price_output_per_1m_usd: Number(document.getElementById("wizardOutputPrice").value || 0),
+        api_key: document.getElementById("wizardApiKey").value.trim() || null,
+      };
+      if (!payload.selected_model) {
+        statusEl.textContent = "Setup error: model is required.";
+        return showToast("Setup error: model is required.", "error");
+      }
+      if (payload.adapter_mode === "external" && !payload.external_base_url) {
+        statusEl.textContent = "Setup error: external base URL is required.";
+        return showToast("Setup error: external base URL is required.", "error");
+      }
+      statusEl.textContent = "Applying setup...";
+      try {
+        await api("/workspace/setup/bootstrap", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        await loadAll();
+        closeSetupWizard();
+        document.getElementById("settingsStatus").textContent = "Workspace setup files updated successfully.";
+        showToast("Workspace setup saved.");
+      } catch (error) {
+        const message = parseError(error);
+        statusEl.textContent = `Setup error: ${message}`;
+        showToast(`Setup error: ${message}`, "error");
       }
     }
 
@@ -967,7 +1141,7 @@
     }
 
     async function loadSessions() {
-      const projectId = document.getElementById("projectId").value.trim() || "external";
+      const projectId = document.getElementById("projectId").value.trim() || "workspace";
       const payload = await api(`/workspace/sessions?project_id=${encodeURIComponent(projectId)}&limit=50`);
       state.sessions = payload.sessions || [];
       if (!state.sessionId && state.sessions.length) {
@@ -983,6 +1157,9 @@
       renderStatus();
       renderSessions();
       await loadMessages();
+      if (state.settings && !state.settings.first_run_complete) {
+        openSetupWizard();
+      }
     }
 
     async function saveSettings(options = {}) {
@@ -1035,16 +1212,11 @@
     }
 
     async function runFirstRunSetup() {
-      const ok = await saveSettings({ setup: true });
-      if (!ok) return;
-      if (state.status?.adapter?.adapter_mode === "external" && state.status?.adapter?.status !== "ok") {
-        showToast("Workspace saved settings, but External memory service is not healthy yet.", "error");
-      }
-      setSidebarTab("control");
+      openSetupWizard();
     }
 
     async function createSession() {
-      const projectId = document.getElementById("projectId").value.trim() || "external";
+      const projectId = document.getElementById("projectId").value.trim() || "workspace";
       const title = document.getElementById("sessionTitle").value.trim() || "Workspace session";
       const payload = await api("/workspace/sessions", {
         method: "POST",
@@ -1122,7 +1294,7 @@
       if (!query) return;
       const payload = await api("/workspace/imports/resume", {
         method: "POST",
-        body: JSON.stringify({ query, project_id: document.getElementById("projectId").value.trim() || "external" }),
+        body: JSON.stringify({ query, project_id: document.getElementById("projectId").value.trim() || "workspace" }),
       });
       if (payload.status !== "ok") return showToast("No imported chat matched that query.", "error");
       await loadSessions();
@@ -1130,7 +1302,7 @@
     }
 
     async function importChatGPT() {
-      const projectId = document.getElementById("importProjectId").value.trim() || "external";
+      const projectId = document.getElementById("importProjectId").value.trim() || "workspace";
       const importMode = document.getElementById("importMode").value;
       const maxConversations = importMode === "all"
         ? 0
@@ -1178,7 +1350,7 @@
     }
 
     async function newChat() {
-      const projectId = state.currentSession?.project_id || document.getElementById("projectId").value.trim() || "external";
+      const projectId = state.currentSession?.project_id || document.getElementById("projectId").value.trim() || "workspace";
       const payload = await api("/workspace/sessions", {
         method: "POST",
         body: JSON.stringify({ project_id: projectId, title: "New Workspace chat", mode: "chat" }),
