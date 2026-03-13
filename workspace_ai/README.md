@@ -58,3 +58,9 @@ cd /Users/briansifrar/Workspace-AI
 ```bash
 ./workspace_ai/scripts/smoke_test.sh
 ```
+
+## Secret Scan
+
+```bash
+./workspace_ai/scripts/check_secrets.sh
+```
