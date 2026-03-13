@@ -58,6 +58,7 @@ class SessionManager:
         bottlenecks: str = "",
         files: list[str] | None = None,
         participants: list[Dict[str, Any]] | None = None,
+        max_rounds: int = 5,
         judge_provider: str | None = None,
     ) -> Dict[str, Any]:
         result = self.debate_service.start_debate(
@@ -66,6 +67,7 @@ class SessionManager:
             bottlenecks=bottlenecks,
             files=files,
             participants=participants,
+            max_rounds=max_rounds,
             judge_provider=judge_provider,
         )
         debate = result.get("debate")

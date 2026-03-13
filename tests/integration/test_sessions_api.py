@@ -60,12 +60,14 @@ def test_debate_start_and_fetch(monkeypatch, isolated_workspace_env):
                 {"provider": "openai", "model": "test-model"},
                 {"provider": "xai", "model": "test-model"},
             ],
+            "max_rounds": 4,
         },
     )
     assert create.status_code == 200
     payload = create.json()
     assert payload["status"] == "ok"
     debate_id = payload["debate"]["debate_id"]
+    assert payload["debate"]["max_rounds"] == 4
     assert payload["debate"]["status"] in {"completed", "max_rounds"}
     assert len(payload["debate"]["rounds"]) >= 1
 
@@ -108,3 +110,19 @@ def test_debate_empty_participants_uses_defaults(monkeypatch, isolated_workspace
     assert len(debate["participants"]) == 2
     assert debate["participants"][0]["provider"] == "openai"
     assert debate["participants"][1]["provider"] == "xai"
+
+
+def test_debate_max_rounds_bounds(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    invalid = client.post(
+        "/workspace/debates",
+        json={
+            "project_id": "forge",
+            "topic": "Bounds check debate",
+            "max_rounds": 0,
+        },
+    )
+    assert invalid.status_code == 422

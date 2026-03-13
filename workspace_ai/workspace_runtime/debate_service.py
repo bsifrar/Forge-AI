@@ -22,6 +22,7 @@ class DebateService:
         bottlenecks: str = "",
         files: List[str] | None = None,
         participants: List[Dict[str, Any]] | None = None,
+        max_rounds: int = 5,
         judge_provider: str | None = None,
     ) -> Dict[str, Any]:
         active_participants = participants or [
@@ -34,16 +35,18 @@ class DebateService:
             bottlenecks=bottlenecks,
             files=files or [],
             participants=active_participants,
+            max_rounds=max(1, min(20, int(max_rounds))),
             judge_provider=(judge_provider or "openai").strip().lower(),
         )
-        return self.run_debate(debate_id=str(debate["debate_id"]))
+        return self.run_debate(debate_id=str(debate["debate_id"]), max_rounds=int(debate.get("max_rounds") or max_rounds))
 
-    def run_debate(self, *, debate_id: str) -> Dict[str, Any]:
+    def run_debate(self, *, debate_id: str, max_rounds: int | None = None) -> Dict[str, Any]:
         debate = self.store.get_debate(debate_id)
         if debate is None:
             return {"status": "not_found", "debate_id": debate_id}
         history: List[Dict[str, str]] = []
-        for round_index in range(1, self.max_rounds + 1):
+        effective_max_rounds = max(1, min(20, int(max_rounds if max_rounds is not None else debate.get("max_rounds") or self.max_rounds)))
+        for round_index in range(1, effective_max_rounds + 1):
             for participant in debate["participants"]:
                 provider_name = str(participant.get("provider") or "openai").strip().lower()
                 selected_model = str(participant.get("model") or self.settings_service.get().get("selected_model") or "").strip() or None
@@ -93,10 +96,12 @@ class DebateService:
 
     def _participant_prompt(self, *, debate: Dict[str, Any], history: List[Dict[str, str]], round_index: int) -> str:
         prior = "\n".join(f"- {item['content']}" for item in history[-4:] if str(item.get("content") or "").strip())
+        files = "\n".join(f"- {item}" for item in debate.get("files", []) if str(item).strip())
         return (
             f"Round {round_index} debate.\n"
             f"Topic: {debate.get('topic', '')}\n"
-            f"Bottlenecks: {str(debate.get('bottlenecks') or '').strip() or '[none]'}\n"
+            f"Bottlenecks:\n- {str(debate.get('bottlenecks') or '').strip() or '[none]'}\n"
+            f"Files:\n{files or '- [none]'}\n"
             f"Recent positions:\n{prior or '[none]'}\n\n"
             "Provide a concise engineering recommendation. If you believe the group has converged, end with AGREED."
         )
@@ -110,8 +115,8 @@ class DebateService:
         response = chat.respond(
             project_id=str(debate.get("project_id") or "forge"),
             prompt=(
-                f"Summarize the final engineering plan for this debate topic: {debate.get('topic', '')}. "
-                "Return a concise plan with rationale."
+                f"Summarize the agreed engineering plan for this debate topic: {debate.get('topic', '')}. "
+                "Extract the final plan from the debate history. Return a concise plan with rationale and avoid inventing new requirements."
             ),
             context={"memory_context": {"summary": self._debate_context_summary(debate)}, "checkpoints": []},
             history=history,

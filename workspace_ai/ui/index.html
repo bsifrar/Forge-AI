@@ -322,6 +322,34 @@
       word-break: break-word;
       font-size: 12px;
     }
+    .debate-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .debate-actions button {
+      padding: 8px 10px;
+      border-radius: 12px;
+      font-size: 13px;
+    }
+    .debate-section {
+      margin-top: 10px;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+    .debate-section h4 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--muted);
+    }
+    .debate-content {
+      white-space: pre-line;
+      line-height: 1.45;
+      font-size: 13px;
+    }
     .toast {
       position: fixed;
       right: 24px;
@@ -522,6 +550,7 @@
             <input id="debateTopic" placeholder="Debate topic" />
             <textarea id="debateBottlenecks" placeholder="Current bottlenecks or constraints..."></textarea>
             <input id="debateFiles" placeholder="Optional file paths (comma-separated)" />
+            <input id="debateMaxRounds" type="number" min="1" max="20" value="5" placeholder="Max rounds" />
             <div class="field-label">Participants</div>
             <select id="debateParticipants" multiple>
               <option value='{"provider":"openai","model":"gpt-5.4"}' selected>OpenAI · gpt-5.4</option>
@@ -676,6 +705,10 @@
 
     function draftStorageKey(sessionId) {
       return `workspace.draft.${sessionId || "global"}`;
+    }
+
+    function debateDefaultsStorageKey() {
+      return "forge.debate.defaults";
     }
 
     function saveDraftValue() {
@@ -1084,24 +1117,36 @@
           <div class="meta">
             ${esc(debate.project_id || "forge")} · ${esc(debate.debate_id || "")} · ${esc(debate.status || "unknown")}
           </div>
-          <div class="help-text">Participants: ${esc((debate.participants || []).map(item => item.provider || "unknown").join(", ") || "none")}</div>
-          <div class="help-text">Rounds: ${esc((debate.rounds || []).length)}</div>
+          <div class="help-text">Participants: ${esc((debate.participants || []).map(item => `${item.provider || "unknown"} (${item.model || "default"})`).join(", ") || "none")}</div>
+          <div class="help-text">Rounds: ${esc((debate.rounds || []).length)} / ${esc(debate.max_rounds || 5)}</div>
           ${(debate.bottlenecks || "").trim() ? `<div class="help-text" style="margin-top:8px;"><strong>Bottlenecks</strong>: ${esc(debate.bottlenecks)}</div>` : ""}
-          <details>
-            <summary>Rounds</summary>
-            <pre>${formatJson((debate.rounds || []).map(round => ({
-              round_index: round.round_index,
-              participant_provider: round.participant_provider,
-              participant_model: round.participant_model,
-              response: round.response,
-            })))}</pre>
-          </details>
-          <details>
-            <summary>Final Plan</summary>
-            <pre>${formatJson(debate.final_plan || {})}</pre>
-          </details>
+          <div class="debate-section">
+            <h4>Final Plan</h4>
+            <div class="debate-content">${esc((debate.final_plan || {}).content || "No plan available.")}</div>
+          </div>
+          <div class="debate-section">
+            <h4>Rounds</h4>
+            ${(debate.rounds || []).map(round => `
+              <div class="context-item" style="margin-top:8px;">
+                <div class="type">Round ${esc(round.round_index)} · ${esc(round.participant_provider || "unknown")} · ${esc(round.participant_model || "default")}</div>
+                <div class="debate-content">${esc((round.response || {}).content || "No content.")}</div>
+              </div>
+            `).join("") || `<div class="muted">No rounds recorded.</div>`}
+          </div>
+          <div class="debate-actions">
+            <button class="secondary" onclick='copyDebatePlan(decodeURIComponent(${JSON.stringify(encodeURIComponent((debate.final_plan || {}).content || ""))}))'>Copy Plan</button>
+            <button class="secondary" onclick='copyFullDebate(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(debate || {})))})))'>Copy Full Debate</button>
+          </div>
         </div>
       `).join("");
+    }
+
+    async function copyDebatePlan(content) {
+      await copyText(String(content || ""), "Debate plan copied.");
+    }
+
+    async function copyFullDebate(debate) {
+      await copyText(JSON.stringify(debate || {}, null, 2), "Full debate copied.");
     }
 
     function renderMessages(messages = []) {
@@ -1550,6 +1595,7 @@
         .split(",")
         .map(item => item.trim())
         .filter(Boolean);
+      const maxRounds = Number(document.getElementById("debateMaxRounds").value || 5);
       const participantSelect = document.getElementById("debateParticipants");
       const participants = Array.from(participantSelect.selectedOptions).map(option => JSON.parse(option.value));
       const judgeProvider = document.getElementById("debateJudge").value;
@@ -1571,9 +1617,20 @@
             bottlenecks,
             files,
             participants,
+            max_rounds: maxRounds,
             judge_provider: judgeProvider,
           }),
         });
+        localStorage.setItem(
+          debateDefaultsStorageKey(),
+          JSON.stringify({
+            project_id: projectId,
+            max_rounds: maxRounds,
+            judge_provider: judgeProvider,
+            files: document.getElementById("debateFiles").value,
+            bottlenecks,
+          })
+        );
         document.getElementById("debateTopic").value = "";
         document.getElementById("debateBottlenecks").value = "";
         document.getElementById("debateFiles").value = "";
@@ -1669,6 +1726,16 @@
     toggleImportLimit();
     restoreUIState();
     restoreDraftValue();
+    try {
+      const savedDebateDefaults = JSON.parse(localStorage.getItem(debateDefaultsStorageKey()) || "{}");
+      if (savedDebateDefaults.project_id) document.getElementById("debateProjectId").value = savedDebateDefaults.project_id;
+      if (savedDebateDefaults.max_rounds) document.getElementById("debateMaxRounds").value = savedDebateDefaults.max_rounds;
+      if (savedDebateDefaults.judge_provider) document.getElementById("debateJudge").value = savedDebateDefaults.judge_provider;
+      if (savedDebateDefaults.files) document.getElementById("debateFiles").value = savedDebateDefaults.files;
+      if (savedDebateDefaults.bottlenecks) document.getElementById("debateBottlenecks").value = savedDebateDefaults.bottlenecks;
+    } catch (error) {
+      localStorage.removeItem(debateDefaultsStorageKey());
+    }
     loadAll();
   </script>
 </body>

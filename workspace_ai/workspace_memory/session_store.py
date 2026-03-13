@@ -95,6 +95,7 @@ class SessionStore:
                     bottlenecks TEXT NOT NULL DEFAULT '',
                     files_json TEXT NOT NULL DEFAULT '[]',
                     participants_json TEXT NOT NULL DEFAULT '[]',
+                    max_rounds INTEGER NOT NULL DEFAULT 5,
                     judge_provider TEXT NOT NULL DEFAULT 'openai',
                     final_plan_json TEXT NOT NULL DEFAULT '{}',
                     status TEXT NOT NULL DEFAULT 'pending',
@@ -113,6 +114,12 @@ class SessionStore:
                 );
                 """
             )
+            debate_columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(debates)").fetchall()
+            }
+            if "max_rounds" not in debate_columns:
+                conn.execute("ALTER TABLE debates ADD COLUMN max_rounds INTEGER NOT NULL DEFAULT 5")
             conn.commit()
 
     def create_session(self, *, project_id: str, title: str, mode: str, source: str = "workspace", external_conversation_id: str = "", external_title: str = "") -> Dict[str, Any]:
@@ -295,6 +302,7 @@ class SessionStore:
         bottlenecks: str,
         files: List[str],
         participants: List[Dict[str, Any]],
+        max_rounds: int,
         judge_provider: str,
     ) -> Dict[str, Any]:
         debate_id = f"deb_{uuid.uuid4().hex[:12]}"
@@ -303,10 +311,10 @@ class SessionStore:
             conn.execute(
                 """
                 INSERT INTO debates(
-                    debate_id, project_id, topic, bottlenecks, files_json, participants_json,
+                    debate_id, project_id, topic, bottlenecks, files_json, participants_json, max_rounds,
                     judge_provider, final_plan_json, status, created_at, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, '{}', 'pending', ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, '{}', 'pending', ?, ?)
                 """,
                 (
                     debate_id,
@@ -315,6 +323,7 @@ class SessionStore:
                     bottlenecks,
                     self._json(files),
                     self._json(participants),
+                    int(max_rounds),
                     judge_provider,
                     now,
                     now,
@@ -395,6 +404,7 @@ class SessionStore:
         parsed = dict(row)
         parsed["files"] = json.loads(parsed.pop("files_json", "[]"))
         parsed["participants"] = json.loads(parsed.pop("participants_json", "[]"))
+        parsed["max_rounds"] = int(parsed.get("max_rounds") or 5)
         parsed["final_plan"] = json.loads(parsed.pop("final_plan_json", "{}"))
         parsed["rounds"] = self.list_debate_rounds(debate_id=debate_id)
         return parsed

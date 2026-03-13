@@ -51,6 +51,7 @@ def build_router(manager: SessionManager) -> APIRouter:
             bottlenecks=request.bottlenecks,
             files=request.files,
             participants=[participant.model_dump() for participant in request.participants],
+            max_rounds=request.max_rounds,
             judge_provider=request.judge_provider,
         )
 

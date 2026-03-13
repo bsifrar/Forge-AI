@@ -22,6 +22,7 @@ class DebateCreateRequest(BaseModel):
     bottlenecks: str = Field(default="")
     files: List[str] = Field(default_factory=list)
     participants: List[DebateParticipantRequest] = Field(default_factory=list)
+    max_rounds: int = Field(default=5, ge=1, le=20)
     judge_provider: str | None = Field(default=None, pattern="^(openai|xai)$")
 
 

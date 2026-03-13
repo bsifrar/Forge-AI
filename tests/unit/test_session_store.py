@@ -31,9 +31,11 @@ def test_session_store_debate_roundtrip(isolated_workspace_env):
         bottlenecks="Too many choices",
         files=["spec.md"],
         participants=[{"provider": "openai", "model": "gpt-5.4"}],
+        max_rounds=3,
         judge_provider="openai",
     )
     assert debate["topic"] == "Design debate"
+    assert debate["max_rounds"] == 3
 
     round_payload = store.add_debate_round(
         debate_id=debate["debate_id"],
