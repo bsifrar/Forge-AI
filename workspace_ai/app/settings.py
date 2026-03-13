@@ -43,7 +43,7 @@ def get_settings() -> WorkspaceSettings:
     root = Path(__file__).resolve().parents[1]
     return WorkspaceSettings(
         host=os.getenv('WORKSPACE_HOST', '127.0.0.1'),
-        port=int(os.getenv('WORKSPACE_PORT', '8091')),
+        port=int(os.getenv('WORKSPACE_PORT', '8092')),
         storage_path=Path(
             os.getenv('WORKSPACE_STORAGE_PATH', str(root / 'storage' / 'workspace.db'))
         ).expanduser().resolve(),

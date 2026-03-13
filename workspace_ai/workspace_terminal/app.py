@@ -9,7 +9,7 @@ from workspace_ai.workspace_terminal.client import APIClient
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Standalone workspace terminal client")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8091")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8092")
     sub = parser.add_subparsers(dest="command", required=True)
     create = sub.add_parser("create-session")
     create.add_argument("project_id")

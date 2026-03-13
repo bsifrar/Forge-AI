@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 
 
 class APIClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:8091") -> None:
+    def __init__(self, base_url: str = "http://127.0.0.1:8092") -> None:
         self.base_url = base_url.rstrip("/")
 
     def get(self, path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:

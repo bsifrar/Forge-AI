@@ -81,7 +81,7 @@ class SettingsService:
             '# Workspace runtime defaults. Keep secrets in .env.workspace.secret.',
             f'WORKSPACE_ADAPTER_MODE={adapter_mode}',
             f'WORKSPACE_HOST=127.0.0.1',
-            f'WORKSPACE_PORT=8091',
+            f'WORKSPACE_PORT=8092',
             f'WORKSPACE_PROVIDER={selected_provider}',
             f'WORKSPACE_MODEL={selected_model}',
             f'WORKSPACE_DAILY_CAP={daily_cap:g}',

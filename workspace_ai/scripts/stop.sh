@@ -7,7 +7,7 @@ source "$ROOT_DIR/scripts/lib/env.sh"
 load_workspace_env
 
 LOG_DIR="${WORKSPACE_STACK_LOG_DIR:-$ROOT_DIR/.runtime_logs}"
-WORKSPACE_PORT="${WORKSPACE_PORT:-8091}"
+WORKSPACE_PORT="${WORKSPACE_PORT:-8092}"
 
 stop_from_pidfile() {
     local pidfile="$1"

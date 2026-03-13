@@ -8,7 +8,7 @@ source "$ROOT_DIR/scripts/lib/env.sh"
 load_workspace_env
 
 WORKSPACE_HOST="${WORKSPACE_HOST:-127.0.0.1}"
-WORKSPACE_PORT="${WORKSPACE_PORT:-8091}"
+WORKSPACE_PORT="${WORKSPACE_PORT:-8092}"
 
 export PYTHONPATH="$REPO_ROOT"
 
