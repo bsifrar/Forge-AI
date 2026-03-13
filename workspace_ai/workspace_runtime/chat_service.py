@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List
 
+from workspace_ai.providers.base import LLMProvider
 from workspace_ai.providers.openai_provider import OpenAIProvider
 
 
 class ChatService:
-    def __init__(self, provider: OpenAIProvider | None = None) -> None:
+    def __init__(self, provider: LLMProvider | None = None) -> None:
         self.provider = provider or OpenAIProvider()
 
     def _system_prompt(self, *, project_id: str, context: Dict[str, Any]) -> str:
@@ -18,7 +19,7 @@ class ChatService:
             if str(item.get("summary") or "").strip()
         )
         return (
-            "You are Workspace, a Persistent AI Workspace assistant. Continue the current project conversation, "
+            "You are Forge, a persistent AI engineering workspace assistant. Continue the current project conversation, "
             "use provided context, preserve continuity, and stay concise.\n\n"
             f"Active project: {project_id}\n\n"
             f"Retrieved memory context:\n{summary or '[none]'}\n\n"

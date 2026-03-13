@@ -1,15 +1,15 @@
-# Workspace
+# Forge
 
-Persistent AI Workspace.
+Persistent AI engineering workspace.
 
-Workspace is the isolated browser and terminal application.
+Forge is the isolated browser and terminal application.
 
 It does not start, stop, or own any external runtime. If you want external-service-backed memory, run the external memory service separately and point Workspace at it over HTTP.
 
 ## Install
 
 ```bash
-cd /Users/briansifrar/Workspace-AI
+cd /Users/briansifrar/Forge-AI
 ./workspace_ai/scripts/install.sh
 ```
 
@@ -23,7 +23,7 @@ Use `.env.workspace` for non-secret config and `.env.workspace.secret` for local
 ## Run Without External Memory Service
 
 ```bash
-cd /Users/briansifrar/Workspace-AI
+cd /Users/briansifrar/Forge-AI
 ./workspace_ai/scripts/start.sh
 ```
 
@@ -37,7 +37,7 @@ Set these in `.env.workspace`:
 Then run:
 
 ```bash
-cd /Users/briansifrar/Workspace-AI
+cd /Users/briansifrar/Forge-AI
 ./workspace_ai/scripts/start.sh
 ```
 

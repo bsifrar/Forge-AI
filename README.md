@@ -1,13 +1,13 @@
-# Workspace-AI
+# Forge-AI
 
-Standalone Workspace product.
+Standalone Forge workspace product.
 
 ## Main entrypoint
 
 Use the root launcher:
 
 ```bash
-cd /Users/briansifrar/Workspace-AI
+cd /Users/briansifrar/Forge-AI
 ./workspace.sh start
 ```
 

@@ -5,14 +5,24 @@ from typing import Any, Dict, Iterable, List
 from urllib.request import Request, urlopen
 
 from workspace_ai.app.settings import get_settings
+from workspace_ai.providers.base import LLMProvider
 
 
-class OpenAIProvider:
-    def __init__(self) -> None:
+class OpenAIProvider(LLMProvider):
+    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         settings = get_settings()
-        self.api_key = settings.openai_api_key
-        self.default_model = settings.default_model
+        self.api_key = api_key if api_key is not None else settings.openai_api_key
+        self.default_model = model if model is not None else settings.default_model
         self.base_url = "https://api.openai.com/v1"
+
+    def capabilities(self) -> Dict[str, Any]:
+        return {
+            "provider": "openai",
+            "streaming": True,
+            "responses_api": True,
+            "files": False,
+            "tools": [],
+        }
 
     def _extract_output_text(self, payload: Dict[str, Any]) -> str:
         text = payload.get("output_text")

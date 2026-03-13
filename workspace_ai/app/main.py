@@ -32,7 +32,7 @@ def build_app() -> FastAPI:
     settings = get_settings()
     adapter = ExternalAdapter(settings.external_base_url) if settings.adapter_mode == "external" else NullAdapter()
     manager = SessionManager(adapter=adapter)
-    app = FastAPI(title="Workspace", version="0.1.0")
+    app = FastAPI(title="Forge-AI", version="0.1.0")
     app.include_router(build_router(manager))
 
     @app.get("/", response_class=HTMLResponse)
@@ -42,8 +42,8 @@ def build_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict:
         return {
-            "service": "workspace",
-            "tagline": "Persistent AI Workspace",
+            "service": "forge-ai",
+            "tagline": "Persistent AI Engineering Workspace",
             "adapter_mode": settings.adapter_mode,
             "external_base_url": settings.external_base_url if settings.adapter_mode == "external" else None,
             "storage_path": str(settings.storage_path),
