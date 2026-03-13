@@ -16,16 +16,37 @@ class StandaloneSettings:
     default_model: str
 
 
+def _load_env_files() -> None:
+    app_root = Path(__file__).resolve().parents[1]
+    project_root = app_root.parent
+    for filename in ['.env.workspace', '.env.workspace.secret']:
+        path = project_root / filename
+        if not path.exists():
+            continue
+        for raw_line in path.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            os.environ.setdefault(key, value)
+
+    if os.getenv('WORKSPACE_API_KEY') and not os.getenv('WORKSPACE_OPENAI_API_KEY'):
+        os.environ['WORKSPACE_OPENAI_API_KEY'] = os.environ['WORKSPACE_API_KEY']
+
+
 def get_settings() -> StandaloneSettings:
+    _load_env_files()
     root = Path(__file__).resolve().parents[1]
     return StandaloneSettings(
-        host=os.getenv("WORKSPACE_HOST", "127.0.0.1"),
-        port=int(os.getenv("WORKSPACE_PORT", "8091")),
+        host=os.getenv('WORKSPACE_HOST', '127.0.0.1'),
+        port=int(os.getenv('WORKSPACE_PORT', '8091')),
         storage_path=Path(
-            os.getenv("WORKSPACE_STORAGE_PATH", str(root / "storage" / "workspace.db"))
+            os.getenv('WORKSPACE_STORAGE_PATH', str(root / 'storage' / 'workspace.db'))
         ).expanduser().resolve(),
-        synapse_base_url=os.getenv("WORKSPACE_SYNAPSE_BASE_URL", "http://127.0.0.1:8080"),
-        adapter_mode=os.getenv("WORKSPACE_ADAPTER_MODE", "null").strip().lower(),
-        openai_api_key=os.getenv("WORKSPACE_OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")),
-        default_model=os.getenv("WORKSPACE_MODEL", os.getenv("SYNAPSE_WORKSPACE_OPENAI_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4"))),
+        synapse_base_url=os.getenv('WORKSPACE_SYNAPSE_BASE_URL', 'http://127.0.0.1:8080'),
+        adapter_mode=os.getenv('WORKSPACE_ADAPTER_MODE', 'null').strip().lower(),
+        openai_api_key=os.getenv('WORKSPACE_API_KEY', os.getenv('WORKSPACE_OPENAI_API_KEY', os.getenv('OPENAI_API_KEY', ''))),
+        default_model=os.getenv('WORKSPACE_MODEL', os.getenv('OPENAI_MODEL', 'gpt-5.4')),
     )

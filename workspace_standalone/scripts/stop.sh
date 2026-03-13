@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/env.sh"
-load_vector_env
+load_workspace_env
 
 LOG_DIR="${WORKSPACE_STACK_LOG_DIR:-$ROOT_DIR/.runtime_logs}"
 WORKSPACE_PORT="${WORKSPACE_PORT:-8091}"

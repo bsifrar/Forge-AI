@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/env.sh"
-load_vector_env
+load_workspace_env
 
 LOG_DIR="${WORKSPACE_STACK_LOG_DIR:-$ROOT_DIR/.runtime_logs}"
 mkdir -p "$LOG_DIR"

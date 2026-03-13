@@ -16,6 +16,8 @@ cd /Users/briansifrar/SynapseWorkspaceStandalone
 ```bash
 export WORKSPACE_ADAPTER_MODE=null
 ./workspace_standalone/scripts/start.sh
+
+Use `.env.workspace` for non-secret config and `.env.workspace.secret` for local secrets.
 ```
 
 ## Run With Synapse As External Dependency
@@ -23,8 +25,10 @@ export WORKSPACE_ADAPTER_MODE=null
 ```bash
 export WORKSPACE_ADAPTER_MODE=synapse
 export WORKSPACE_SYNAPSE_BASE_URL=http://127.0.0.1:8080
-export WORKSPACE_OPENAI_API_KEY=...
+export WORKSPACE_API_KEY=...
 ./workspace_standalone/scripts/start.sh
+
+Use `.env.workspace` for non-secret config and `.env.workspace.secret` for local secrets.
 ```
 
 ## Stop

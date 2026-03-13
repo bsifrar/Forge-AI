@@ -1,3 +1,6 @@
+.DS_Store
+.env.workspace
+.env.workspace.secret
 .venv/
 .runtime_logs/
 workspace_standalone/storage/*.db
