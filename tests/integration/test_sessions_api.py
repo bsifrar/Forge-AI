@@ -72,3 +72,39 @@ def test_debate_start_and_fetch(monkeypatch, isolated_workspace_env):
     fetched = client.get(f"/workspace/debates/{debate_id}")
     assert fetched.status_code == 200
     assert fetched.json()["debate"]["debate_id"] == debate_id
+
+
+def test_debate_invalid_provider_payload(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    invalid = client.post(
+        "/workspace/debates",
+        json={
+            "project_id": "forge",
+            "topic": "Invalid provider debate",
+            "participants": [{"provider": "bad-provider", "model": "test-model"}],
+        },
+    )
+    assert invalid.status_code == 422
+
+
+def test_debate_empty_participants_uses_defaults(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    created = client.post(
+        "/workspace/debates",
+        json={
+            "project_id": "forge",
+            "topic": "Fallback participants debate",
+            "participants": [],
+        },
+    )
+    assert created.status_code == 200
+    debate = created.json()["debate"]
+    assert len(debate["participants"]) == 2
+    assert debate["participants"][0]["provider"] == "openai"
+    assert debate["participants"][1]["provider"] == "xai"
