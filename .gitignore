@@ -8,3 +8,5 @@ workspace_ai/storage/*.sqlite
 workspace_ai/**/__pycache__/
 workspace_ai/.venv/
 workspace_ai/.runtime_logs/
+tests/**/__pycache__/
+tests/**/*.pyc
