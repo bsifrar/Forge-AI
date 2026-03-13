@@ -8,6 +8,7 @@ from workspace_ai.workspace_import.chatgpt_importer import ChatGPTExportImporter
 from workspace_ai.workspace_memory.context_service import ContextService
 from workspace_ai.workspace_memory.session_store import SessionStore
 from workspace_ai.workspace_runtime.chat_service import ChatService
+from workspace_ai.workspace_runtime.debate_service import DebateService
 from workspace_ai.workspace_runtime.policy_service import PolicyService
 from workspace_ai.workspace_runtime.settings_service import SettingsService
 from workspace_ai.workspace_runtime.stream_manager import StreamManager
@@ -21,6 +22,7 @@ class SessionManager:
         self.chat_service = ChatService()
         self.stream_manager = StreamManager()
         self.settings_service = SettingsService(store=self.store)
+        self.debate_service = DebateService(store=self.store, settings_service=self.settings_service)
         self.policy_service = PolicyService(store=self.store, settings_service=self.settings_service)
         self.importer = ChatGPTExportImporter(store=self.store, adapter=self.adapter)
 
@@ -41,6 +43,39 @@ class SessionManager:
 
     def adapter_status(self) -> Dict[str, Any]:
         return {"status": "ok", "adapter": self.context_service.adapter_health()}
+
+    def list_debates(self, *, project_id: str | None = None, limit: int = 50) -> Dict[str, Any]:
+        return self.debate_service.list_debates(project_id=project_id, limit=limit)
+
+    def get_debate(self, *, debate_id: str) -> Dict[str, Any]:
+        return self.debate_service.get_debate(debate_id=debate_id)
+
+    def start_debate(
+        self,
+        *,
+        project_id: str,
+        topic: str,
+        bottlenecks: str = "",
+        files: list[str] | None = None,
+        participants: list[Dict[str, Any]] | None = None,
+        judge_provider: str | None = None,
+    ) -> Dict[str, Any]:
+        result = self.debate_service.start_debate(
+            project_id=project_id,
+            topic=topic,
+            bottlenecks=bottlenecks,
+            files=files,
+            participants=participants,
+            judge_provider=judge_provider,
+        )
+        debate = result.get("debate")
+        if isinstance(debate, dict):
+            self.stream_manager.publish(
+                event_type="workspace.debate.completed",
+                session_id=None,
+                payload={"debate": debate},
+            )
+        return result
 
     def update_settings(self, updates: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "ok", "settings": self.settings_service.update(updates)}

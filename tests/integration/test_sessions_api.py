@@ -43,3 +43,32 @@ def test_settings_include_provider_selection(monkeypatch, isolated_workspace_env
     payload = settings.json()["settings"]
     assert payload["selected_provider"] == "xai"
     assert "xai" in payload["available_providers"]
+
+
+def test_debate_start_and_fetch(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    create = client.post(
+        "/workspace/debates",
+        json={
+            "project_id": "forge",
+            "topic": "How should Forge structure provider debates?",
+            "bottlenecks": "Need a minimal orchestration loop",
+            "participants": [
+                {"provider": "openai", "model": "test-model"},
+                {"provider": "xai", "model": "test-model"},
+            ],
+        },
+    )
+    assert create.status_code == 200
+    payload = create.json()
+    assert payload["status"] == "ok"
+    debate_id = payload["debate"]["debate_id"]
+    assert payload["debate"]["status"] in {"completed", "max_rounds"}
+    assert len(payload["debate"]["rounds"]) >= 1
+
+    fetched = client.get(f"/workspace/debates/{debate_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["debate"]["debate_id"] == debate_id

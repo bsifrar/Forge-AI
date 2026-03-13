@@ -88,6 +88,29 @@ class SessionStore:
                     estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS debates (
+                    debate_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    bottlenecks TEXT NOT NULL DEFAULT '',
+                    files_json TEXT NOT NULL DEFAULT '[]',
+                    participants_json TEXT NOT NULL DEFAULT '[]',
+                    judge_provider TEXT NOT NULL DEFAULT 'openai',
+                    final_plan_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS debate_rounds (
+                    round_id TEXT PRIMARY KEY,
+                    debate_id TEXT NOT NULL,
+                    round_index INTEGER NOT NULL,
+                    participant_provider TEXT NOT NULL,
+                    participant_model TEXT NOT NULL DEFAULT '',
+                    response_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(debate_id) REFERENCES debates(debate_id) ON DELETE CASCADE
+                );
                 """
             )
             conn.commit()
@@ -263,3 +286,132 @@ class SessionStore:
             "calls_today": int(day["n"] or 0),
             "spent_today_usd": float(day["cost"] or 0.0),
         }
+
+    def create_debate(
+        self,
+        *,
+        project_id: str,
+        topic: str,
+        bottlenecks: str,
+        files: List[str],
+        participants: List[Dict[str, Any]],
+        judge_provider: str,
+    ) -> Dict[str, Any]:
+        debate_id = f"deb_{uuid.uuid4().hex[:12]}"
+        now = self._now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO debates(
+                    debate_id, project_id, topic, bottlenecks, files_json, participants_json,
+                    judge_provider, final_plan_json, status, created_at, updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, '{}', 'pending', ?, ?)
+                """,
+                (
+                    debate_id,
+                    project_id,
+                    topic,
+                    bottlenecks,
+                    self._json(files),
+                    self._json(participants),
+                    judge_provider,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        return self.get_debate(debate_id) or {}
+
+    def add_debate_round(
+        self,
+        *,
+        debate_id: str,
+        round_index: int,
+        participant_provider: str,
+        participant_model: str,
+        response: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        round_id = f"rnd_{uuid.uuid4().hex[:12]}"
+        now = self._now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO debate_rounds(
+                    round_id, debate_id, round_index, participant_provider, participant_model, response_json, created_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    round_id,
+                    debate_id,
+                    int(round_index),
+                    participant_provider,
+                    participant_model,
+                    self._json(response),
+                    now,
+                ),
+            )
+            conn.execute("UPDATE debates SET status = 'running', updated_at = ? WHERE debate_id = ?", (now, debate_id))
+            conn.commit()
+        return {
+            "round_id": round_id,
+            "debate_id": debate_id,
+            "round_index": int(round_index),
+            "participant_provider": participant_provider,
+            "participant_model": participant_model,
+            "response": response,
+            "created_at": now,
+        }
+
+    def finalize_debate(self, *, debate_id: str, final_plan: Dict[str, Any], status: str = "completed") -> Dict[str, Any] | None:
+        now = self._now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE debates SET final_plan_json = ?, status = ?, updated_at = ? WHERE debate_id = ?",
+                (self._json(final_plan), status, now, debate_id),
+            )
+            conn.commit()
+        return self.get_debate(debate_id)
+
+    def list_debate_rounds(self, *, debate_id: str) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM debate_rounds WHERE debate_id = ? ORDER BY round_index ASC, created_at ASC",
+                (debate_id,),
+            ).fetchall()
+        payloads: List[Dict[str, Any]] = []
+        for row in rows:
+            parsed = dict(row)
+            parsed["response"] = json.loads(parsed.pop("response_json", "{}"))
+            payloads.append(parsed)
+        return payloads
+
+    def get_debate(self, debate_id: str) -> Dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM debates WHERE debate_id = ?", (debate_id,)).fetchone()
+        if not row:
+            return None
+        parsed = dict(row)
+        parsed["files"] = json.loads(parsed.pop("files_json", "[]"))
+        parsed["participants"] = json.loads(parsed.pop("participants_json", "[]"))
+        parsed["final_plan"] = json.loads(parsed.pop("final_plan_json", "{}"))
+        parsed["rounds"] = self.list_debate_rounds(debate_id=debate_id)
+        return parsed
+
+    def list_debates(self, *, project_id: str | None = None, limit: int = 50) -> List[Dict[str, Any]]:
+        sql = "SELECT debate_id FROM debates"
+        params: list[Any] = []
+        if project_id:
+            sql += " WHERE project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, min(500, int(limit))))
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            debate = self.get_debate(str(row["debate_id"]))
+            if debate is not None:
+                out.append(debate)
+        return out

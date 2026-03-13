@@ -11,6 +11,20 @@ class SessionCreateRequest(BaseModel):
     mode: str = Field(default="chat")
 
 
+class DebateParticipantRequest(BaseModel):
+    provider: str = Field(pattern="^(openai|xai)$")
+    model: str | None = Field(default=None)
+
+
+class DebateCreateRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    topic: str = Field(min_length=1)
+    bottlenecks: str = Field(default="")
+    files: List[str] = Field(default_factory=list)
+    participants: List[DebateParticipantRequest] = Field(default_factory=list)
+    judge_provider: str | None = Field(default=None, pattern="^(openai|xai)$")
+
+
 class MessageCreateRequest(BaseModel):
     content: str = Field(min_length=1)
     role: str = Field(default="user")

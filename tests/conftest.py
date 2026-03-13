@@ -31,4 +31,9 @@ def isolated_workspace_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> P
     monkeypatch.setenv("WORKSPACE_PORT", "8091")
     monkeypatch.setenv("WORKSPACE_PROVIDER", "openai")
     monkeypatch.setenv("WORKSPACE_MODEL", "test-model")
+    monkeypatch.setenv("WORKSPACE_API_KEY", "")
+    monkeypatch.setenv("WORKSPACE_OPENAI_API_KEY", "")
+    monkeypatch.setenv("WORKSPACE_XAI_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("XAI_API_KEY", "")
     return storage_path

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 
-from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, EventListResponse, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
+from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, DebateCreateRequest, EventListResponse, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
 from workspace_ai.workspace_api.streaming import encode_sse_stream
 from workspace_ai.workspace_runtime.session_manager import SessionManager
 
@@ -38,6 +38,25 @@ def build_router(manager: SessionManager) -> APIRouter:
     @router.get("/sessions")
     def list_sessions(project_id: str | None = None, limit: int = 50) -> dict:
         return manager.list_sessions(project_id=project_id, limit=limit)
+
+    @router.get("/debates")
+    def list_debates(project_id: str | None = None, limit: int = 50) -> dict:
+        return manager.list_debates(project_id=project_id, limit=limit)
+
+    @router.post("/debates")
+    def start_debate(request: DebateCreateRequest) -> dict:
+        return manager.start_debate(
+            project_id=request.project_id,
+            topic=request.topic,
+            bottlenecks=request.bottlenecks,
+            files=request.files,
+            participants=[participant.model_dump() for participant in request.participants],
+            judge_provider=request.judge_provider,
+        )
+
+    @router.get("/debates/{debate_id}")
+    def get_debate(debate_id: str) -> dict:
+        return manager.get_debate(debate_id=debate_id)
 
     @router.get("/sessions/{session_id}")
     def get_session(session_id: str) -> dict:
