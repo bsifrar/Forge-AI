@@ -30,3 +30,16 @@ def test_session_create_list_delete_and_meta(monkeypatch, isolated_workspace_env
     deleted = client.delete(f"/workspace/sessions/{session_id}")
     assert deleted.status_code == 200
     assert deleted.json()["deleted_session_id"] == session_id
+
+
+def test_settings_include_provider_selection(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    monkeypatch.setenv("WORKSPACE_PROVIDER", "xai")
+    app = build_app()
+    client = TestClient(app)
+
+    settings = client.get("/workspace/settings")
+    assert settings.status_code == 200
+    payload = settings.json()["settings"]
+    assert payload["selected_provider"] == "xai"
+    assert "xai" in payload["available_providers"]

@@ -35,6 +35,10 @@ class SessionManager:
     def settings(self) -> Dict[str, Any]:
         return {"status": "ok", "settings": self.settings_service.get()}
 
+    def _selected_provider(self) -> str:
+        settings_payload = self.settings_service.get()
+        return str(settings_payload.get("selected_provider") or "openai").strip().lower()
+
     def adapter_status(self) -> Dict[str, Any]:
         return {"status": "ok", "adapter": self.context_service.adapter_health()}
 
@@ -155,13 +159,14 @@ class SessionManager:
         context = self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget)
         history = self.store.list_messages(session_id=session_id, limit=40)
         selected_model = model or str(policy["settings"]["selected_model"])
-        api_key = self.settings_service.api_key()
+        selected_provider = self._selected_provider()
+        api_key = self.settings_service.api_key(selected_provider)
         if policy["allowed"]:
-            response = self.chat_service.respond(project_id=session["project_id"], prompt=content, context=context, history=history[:-1], model=selected_model, api_key=api_key)
+            response = self.chat_service.respond(project_id=session["project_id"], prompt=content, context=context, history=history[:-1], model=selected_model, api_key=api_key, provider_name=selected_provider)
             if response.get("mode") == "live":
-                self.policy_service.record_live_call(session_id=session_id, provider=str(response.get("provider") or "openai"), model=str(response.get("model") or selected_model), mode=str(response.get("mode") or "live"), usage=response.get("usage", {}))
+                self.policy_service.record_live_call(session_id=session_id, provider=str(response.get("provider") or selected_provider), model=str(response.get("model") or selected_model), mode=str(response.get("mode") or "live"), usage=response.get("usage", {}))
         else:
-            response = {"content": f"[workspace blocked:{policy['reason']}] {content[:400]}", "provider": "openai", "model": selected_model, "mode": "blocked", "usage": {}}
+            response = {"content": f"[workspace blocked:{policy['reason']}] {content[:400]}", "provider": selected_provider, "model": selected_model, "mode": "blocked", "usage": {}}
         assistant = self.store.add_message(
             session_id=session_id,
             role="assistant",
@@ -184,11 +189,12 @@ class SessionManager:
         context = self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget)
         history = self.store.list_messages(session_id=session_id, limit=40)
         selected_model = model or str(policy["settings"]["selected_model"])
-        api_key = self.settings_service.api_key()
+        selected_provider = self._selected_provider()
+        api_key = self.settings_service.api_key(selected_provider)
         collected: list[str] = []
-        meta: Dict[str, Any] = {"mode": "blocked", "model": selected_model, "provider": "openai", "usage": {}, "policy_reason": policy["reason"]}
+        meta: Dict[str, Any] = {"mode": "blocked", "model": selected_model, "provider": selected_provider, "usage": {}, "policy_reason": policy["reason"]}
         if policy["allowed"]:
-            for event in self.chat_service.respond_stream(project_id=session["project_id"], prompt=content, context=context, history=history[:-1], model=selected_model, api_key=api_key):
+            for event in self.chat_service.respond_stream(project_id=session["project_id"], prompt=content, context=context, history=history[:-1], model=selected_model, api_key=api_key, provider_name=selected_provider):
                 event_type = str(event.get("type") or "")
                 if event_type == "response.output_text.delta":
                     delta = str(event.get("delta") or "")
@@ -201,7 +207,7 @@ class SessionManager:
                     meta = {
                         "mode": str(source.get("mode") or "live"),
                         "model": source.get("model"),
-                        "provider": str(source.get("provider") or "openai"),
+                        "provider": str(source.get("provider") or selected_provider),
                         "usage": source.get("usage", {}) if isinstance(source.get("usage"), dict) else {},
                         "policy_reason": policy["reason"],
                     }

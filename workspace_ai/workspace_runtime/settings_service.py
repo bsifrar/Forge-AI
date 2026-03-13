@@ -14,7 +14,8 @@ class SettingsService:
     def defaults(self) -> Dict[str, Any]:
         settings = get_settings()
         return {
-            "api_enabled": bool(settings.openai_api_key),
+            "api_enabled": bool(settings.openai_api_key or settings.xai_api_key),
+            "selected_provider": settings.default_provider,
             "selected_model": settings.default_model,
             "daily_spend_cap_usd": 5.0,
             "hourly_call_cap": 50,
@@ -22,8 +23,15 @@ class SettingsService:
             "price_output_per_1m_usd": 0.0,
         }
 
-    def api_key(self) -> str:
-        stored = self.store.list_settings().get("api_key", "")
+    def api_key(self, provider: str = "openai") -> str:
+        normalized = provider.strip().lower()
+        settings_map = self.store.list_settings()
+        if normalized == "xai":
+            stored = settings_map.get("xai_api_key", "")
+            if isinstance(stored, str) and stored.strip():
+                return stored.strip()
+            return get_settings().xai_api_key
+        stored = settings_map.get("api_key", "")
         if isinstance(stored, str) and stored.strip():
             return stored.strip()
         return get_settings().openai_api_key
@@ -38,7 +46,8 @@ class SettingsService:
         payload["external_base_url"] = settings.external_base_url
         payload["env_workspace_present"] = (project_root / ".env.workspace").exists()
         payload["env_secret_present"] = (project_root / ".env.workspace.secret").exists()
-        payload["api_key_configured"] = bool(self.api_key())
+        payload["api_key_configured"] = bool(self.api_key(str(payload.get("selected_provider") or "openai")))
+        payload["available_providers"] = ["openai", "xai"]
         payload["usage"] = self.store.api_usage_summary()
         payload["remaining_daily_budget_usd"] = max(0.0, round(float(payload["daily_spend_cap_usd"]) - float(payload["usage"]["spent_today_usd"]), 6))
         payload["remaining_hourly_calls"] = max(0, int(payload["hourly_call_cap"]) - int(payload["usage"]["calls_this_hour"]))
@@ -59,6 +68,7 @@ class SettingsService:
 
         adapter_mode = (updates.get('adapter_mode') or 'null').strip().lower()
         external_base_url = (updates.get('external_base_url') or 'http://127.0.0.1:8080').strip()
+        selected_provider = (updates.get('selected_provider') or 'openai').strip().lower()
         selected_model = (updates.get('selected_model') or 'gpt-5.4').strip()
         daily_cap = float(updates.get('daily_spend_cap_usd') or 0.0)
         hourly_cap = int(updates.get('hourly_call_cap') or 0)
@@ -72,6 +82,7 @@ class SettingsService:
             f'WORKSPACE_ADAPTER_MODE={adapter_mode}',
             f'WORKSPACE_HOST=127.0.0.1',
             f'WORKSPACE_PORT=8091',
+            f'WORKSPACE_PROVIDER={selected_provider}',
             f'WORKSPACE_MODEL={selected_model}',
             f'WORKSPACE_DAILY_CAP={daily_cap:g}',
             f'WORKSPACE_HOURLY_CAP={hourly_cap}',
@@ -91,6 +102,7 @@ class SettingsService:
 
         self.update({
             'api_enabled': api_enabled,
+            'selected_provider': selected_provider,
             'selected_model': selected_model,
             'daily_spend_cap_usd': daily_cap,
             'hourly_call_cap': hourly_cap,

@@ -13,6 +13,8 @@ class WorkspaceSettings:
     external_base_url: str
     adapter_mode: str
     openai_api_key: str
+    xai_api_key: str
+    default_provider: str
     default_model: str
 
 
@@ -48,5 +50,7 @@ def get_settings() -> WorkspaceSettings:
         external_base_url=os.getenv('WORKSPACE_EXTERNAL_BASE_URL', 'http://127.0.0.1:8080'),
         adapter_mode=os.getenv('WORKSPACE_ADAPTER_MODE', 'null').strip().lower(),
         openai_api_key=os.getenv('WORKSPACE_API_KEY', os.getenv('WORKSPACE_OPENAI_API_KEY', os.getenv('OPENAI_API_KEY', ''))),
+        xai_api_key=os.getenv('WORKSPACE_XAI_API_KEY', os.getenv('XAI_API_KEY', '')),
+        default_provider=os.getenv('WORKSPACE_PROVIDER', 'openai').strip().lower(),
         default_model=os.getenv('WORKSPACE_MODEL', os.getenv('OPENAI_MODEL', 'gpt-5.4')),
     )

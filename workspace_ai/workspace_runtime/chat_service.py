@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List
 
+from workspace_ai.providers import get_provider
 from workspace_ai.providers.base import LLMProvider
-from workspace_ai.providers.openai_provider import OpenAIProvider
 
 
 class ChatService:
     def __init__(self, provider: LLMProvider | None = None) -> None:
-        self.provider = provider or OpenAIProvider()
+        self.provider = provider
 
     def _system_prompt(self, *, project_id: str, context: Dict[str, Any]) -> str:
         summary = str(context.get("memory_context", {}).get("summary") or "").strip()
@@ -26,10 +26,17 @@ class ChatService:
             f"Recent checkpoints:\n{checkpoint_text or '[none]'}"
         )
 
-    def respond(self, *, project_id: str, prompt: str, context: Dict[str, Any], history: List[Dict[str, Any]], model: str | None = None, api_key: str | None = None) -> Dict[str, Any]:
-        conversation = [{"role": str(item.get("role") or "user"), "content": str(item.get("content") or "").strip()} for item in history[-12:] if str(item.get("content") or "").strip()]
-        return self.provider.generate(system_prompt=self._system_prompt(project_id=project_id, context=context), user_prompt=prompt, conversation=conversation, model=model, api_key=api_key)
+    def _provider(self, provider_name: str, *, api_key: str | None = None, model: str | None = None) -> LLMProvider:
+        if self.provider is not None:
+            return self.provider
+        return get_provider(provider_name, api_key=api_key, model=model)
 
-    def respond_stream(self, *, project_id: str, prompt: str, context: Dict[str, Any], history: List[Dict[str, Any]], model: str | None = None, api_key: str | None = None) -> Iterable[Dict[str, Any]]:
+    def respond(self, *, project_id: str, prompt: str, context: Dict[str, Any], history: List[Dict[str, Any]], model: str | None = None, api_key: str | None = None, provider_name: str = "openai") -> Dict[str, Any]:
         conversation = [{"role": str(item.get("role") or "user"), "content": str(item.get("content") or "").strip()} for item in history[-12:] if str(item.get("content") or "").strip()]
-        return self.provider.generate_stream(system_prompt=self._system_prompt(project_id=project_id, context=context), user_prompt=prompt, conversation=conversation, model=model, api_key=api_key)
+        provider = self._provider(provider_name, api_key=api_key, model=model)
+        return provider.generate(system_prompt=self._system_prompt(project_id=project_id, context=context), user_prompt=prompt, conversation=conversation, model=model, api_key=api_key)
+
+    def respond_stream(self, *, project_id: str, prompt: str, context: Dict[str, Any], history: List[Dict[str, Any]], model: str | None = None, api_key: str | None = None, provider_name: str = "openai") -> Iterable[Dict[str, Any]]:
+        conversation = [{"role": str(item.get("role") or "user"), "content": str(item.get("content") or "").strip()} for item in history[-12:] if str(item.get("content") or "").strip()]
+        provider = self._provider(provider_name, api_key=api_key, model=model)
+        return provider.generate_stream(system_prompt=self._system_prompt(project_id=project_id, context=context), user_prompt=prompt, conversation=conversation, model=model, api_key=api_key)
