@@ -29,18 +29,18 @@
     .shell {
       min-height: 100vh;
       display: grid;
-      grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(280px, 320px);
+      grid-template-columns: minmax(260px, 300px) minmax(0, 1fr) minmax(260px, 300px);
+      gap: 18px;
       align-items: start;
-    }
-    .sidebar, .main {
       padding: 20px;
-      min-width: 0;
     }
-    .inspector {
-      padding: 20px 20px 20px 0;
+    .sidebar, .main, .inspector {
+      padding: 0;
       min-width: 0;
     }
     .panel {
+      width: 100%;
+      overflow: hidden;
       background: var(--panel);
       backdrop-filter: blur(16px);
       border: 1px solid var(--line);
@@ -86,7 +86,8 @@
       font-size: 13px;
     }
     .create-row, .settings-grid, .composer { display: grid; gap: 10px; }
-    .settings-grid { grid-template-columns: 1fr 1fr; }
+    .settings-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .settings-grid > * { min-width: 0; width: 100%; }
     .field-label {
       font-size: 12px;
       color: var(--muted);
@@ -255,6 +256,7 @@
     }
     .tab-panel {
       display: none;
+      min-width: 0;
     }
     .tab-panel.active {
       display: block;
@@ -358,17 +360,15 @@
     }
 
     @media (max-width: 1320px) {
-      .shell { grid-template-columns: minmax(280px, 320px) minmax(0, 1fr); }
+      .shell { grid-template-columns: minmax(250px, 290px) minmax(0, 1fr); }
       .inspector {
         grid-column: 1 / span 2;
-        padding: 0 20px 20px;
       }
       .inspector .panel { height: auto; min-height: 42vh; }
     }
     @media (max-width: 960px) {
       .shell { grid-template-columns: 1fr; }
       .main .panel { height: auto; min-height: 70vh; }
-      .inspector { padding: 0 20px 20px; }
       .inspector .panel { height: auto; min-height: 50vh; }
     }
   </style>
