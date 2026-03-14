@@ -1147,6 +1147,8 @@
       executionsByDebateId: {},
       executionPending: {},
       handoffPreviewText: null,
+      executionContextOverride: {},  // debateId → List[string] (null key means use inherited)
+      contextOverrideOpen: null,     // debateId | null
     };
 
     function draftStorageKey(sessionId) {
@@ -1744,10 +1746,45 @@
       const execution = state.executionsByDebateId[debate.debate_id] || null;
       const pending = Boolean(state.executionPending[debate.debate_id]);
       if (!execution) {
+        const debateImportIds = Array.isArray(debate.context_import_ids) ? debate.context_import_ids : [];
+        const overrideIds = state.executionContextOverride[debate.debate_id] || null;
+        const overridePanelOpen = state.contextOverrideOpen === debate.debate_id;
+        const effectiveIds = overrideIds !== null ? overrideIds : debateImportIds;
+        const contextLabel = overrideIds !== null
+          ? `${overrideIds.length} import(s) — override active`
+          : debateImportIds.length
+            ? `${debateImportIds.length} import(s) — from debate`
+            : "all enabled imports (no debate context set)";
+        const projectId = debate.project_id || "";
+        const availableImports = (state.contextImports || []).filter(item => item.project_id === projectId);
+        const overridePanel = overridePanelOpen ? `
+          <div style="margin-top:8px; padding:8px; background:var(--surface-1); border-radius:6px; border:1px solid var(--border);">
+            <div class="section-title" style="margin-bottom:6px;">Select context imports for this execution</div>
+            ${availableImports.length ? availableImports.map(item => `
+              <label style="display:flex; align-items:center; gap:6px; margin-bottom:4px; font-size:12px; cursor:pointer;">
+                <input type="checkbox" ${effectiveIds.includes(item.import_id) ? "checked" : ""}
+                  onchange="toggleExecutionContextImportChoice('${esc(debate.debate_id || "")}', '${esc(item.import_id || "")}', this.checked, ${JSON.stringify(debateImportIds)})">
+                ${esc(item.source_label || item.import_id)} <span class="pill" style="font-size:10px;">${esc(item.category || "")}</span>
+              </label>
+            `).join("") : `<div class="muted" style="font-size:12px;">No context imports in this project.</div>`}
+            <div style="margin-top:8px; display:flex; gap:6px;">
+              <button class="secondary" style="padding:3px 10px; font-size:11px;" onclick="clearContextOverride('${esc(debate.debate_id || "")}')">Clear override</button>
+              <button class="secondary" style="padding:3px 10px; font-size:11px;" onclick="closeContextOverridePanel()">Done</button>
+            </div>
+          </div>
+        ` : "";
         return `
           <div class="debate-section">
             <h4>Execution</h4>
             <div class="muted">No execution proposal created for this debate yet.</div>
+            <div class="help-text" style="margin-top:6px;">
+              Context: ${contextLabel}
+              <button class="secondary" style="padding:2px 8px; font-size:11px; margin-left:8px;" onclick="toggleContextOverridePanel('${esc(debate.debate_id || "")}')">
+                ${overridePanelOpen ? "Close" : overrideIds !== null ? "Edit override" : "Override"}
+              </button>
+              ${overrideIds !== null ? `<button class="secondary" style="padding:2px 8px; font-size:11px; margin-left:4px;" onclick="clearContextOverride('${esc(debate.debate_id || "")}')">Clear</button>` : ""}
+            </div>
+            ${overridePanel}
             <div class="debate-actions" style="margin-top:10px;">
               <button ${pending ? "disabled" : ""} onclick="createExecutionFromDebate('${esc(debate.debate_id || "")}', 'read_only_v1')">
                 ${pending ? "Creating..." : "Create Review Execution"}
@@ -1771,7 +1808,7 @@
       return `
         <div class="debate-section">
           <h4>Execution</h4>
-          <div class="help-text">Status: ${esc(execution.status || "unknown")} · Mode: ${esc(proposal.mode || result.mode || "unknown")}</div>
+          <div class="help-text">Status: ${esc(execution.status || "unknown")} · Mode: ${esc(proposal.mode || result.mode || "unknown")}${proposal.context_source ? ` · Context: ${esc(proposal.context_source)} (${(execution.context_import_ids || []).length} import(s))` : ""}</div>
           ${proposal.summary ? `<div class="debate-content" style="margin-top:8px;">${esc(proposal.summary)}</div>` : ""}
           ${proposal.artifact_summary ? `<div class="help-text" style="margin-top:8px;">${esc(proposal.artifact_summary)}</div>` : ""}
           ${executionArtifacts.length ? `
@@ -2473,12 +2510,45 @@
       }
     }
 
+    function toggleContextOverridePanel(debateId) {
+      state.contextOverrideOpen = state.contextOverrideOpen === debateId ? null : debateId;
+      renderDebates(state.debates || []);
+    }
+
+    function closeContextOverridePanel() {
+      state.contextOverrideOpen = null;
+      renderDebates(state.debates || []);
+    }
+
+    function toggleExecutionContextImportChoice(debateId, importId, checked, debateImportIds) {
+      if (state.executionContextOverride[debateId] === null || state.executionContextOverride[debateId] === undefined) {
+        // Initialize override from debate's current import IDs
+        state.executionContextOverride[debateId] = Array.from(Array.isArray(debateImportIds) ? debateImportIds : []);
+      }
+      const ids = state.executionContextOverride[debateId];
+      if (checked && !ids.includes(importId)) {
+        ids.push(importId);
+      } else if (!checked) {
+        const idx = ids.indexOf(importId);
+        if (idx >= 0) ids.splice(idx, 1);
+      }
+    }
+
+    function clearContextOverride(debateId) {
+      delete state.executionContextOverride[debateId];
+      state.contextOverrideOpen = null;
+      renderDebates(state.debates || []);
+    }
+
     async function createExecutionFromDebate(debateId, executionMode = "read_only_v1") {
       if (!debateId) return;
       state.executionPending[debateId] = true;
+      state.contextOverrideOpen = null;
       renderDebates(state.debates || []);
       try {
         const debate = (state.debates || []).find(item => item.debate_id === debateId) || {};
+        // Send explicit override IDs if set; otherwise send [] so backend inherits from debate record
+        const overrideIds = state.executionContextOverride[debateId] || null;
         await api("/workspace/executions", {
           method: "POST",
           body: JSON.stringify({
@@ -2486,11 +2556,12 @@
             debate_id: debateId,
             plan: "",
             execution_mode: executionMode,
-            context_import_ids: Array.isArray(debate.context_import_ids) ? debate.context_import_ids : [],
+            context_import_ids: overrideIds !== null ? overrideIds : [],
           }),
         });
         document.getElementById("debateStatus").textContent = `Execution proposal created for ${debateId} in ${executionMode}.`;
         showToast(`Execution proposal created: ${executionMode}.`);
+        delete state.executionContextOverride[debateId];
         await loadDebates();
       } catch (error) {
         const message = parseError(error);

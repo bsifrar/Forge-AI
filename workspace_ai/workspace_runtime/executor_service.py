@@ -36,10 +36,27 @@ class ExecutorService:
         normalized_plan = str(plan or "").strip()
         normalized_debate_id = str(debate_id or "").strip()
         normalized_mode = self._normalize_mode(execution_mode)
-        resolved_import_ids = self._resolve_context_import_ids(project_id=project_id, import_ids=context_import_ids)
+
+        # Determine context source:
+        # - explicit non-empty list → "override" (user chose different imports)
+        # - None + debate_id set → "inherited" (inherit from debate record)
+        # - None + no debate_id → "manual" (standalone plan, fall back to all enabled)
+        if context_import_ids is not None and len(context_import_ids) > 0:
+            resolved_import_ids = self._resolve_context_import_ids(project_id=project_id, import_ids=context_import_ids)
+            context_source = "override"
+        elif normalized_debate_id:
+            debate_for_ctx = self.store.get_debate(normalized_debate_id)
+            debate_import_ids: List[str] = (debate_for_ctx or {}).get("context_import_ids") or []
+            resolved_import_ids = self._resolve_context_import_ids(project_id=project_id, import_ids=debate_import_ids) if debate_import_ids else []
+            context_source = "inherited"
+        else:
+            resolved_import_ids = []
+            context_source = "manual"
+
         source_plan = self._source_plan(project_id=project_id, debate_id=normalized_debate_id, plan=normalized_plan)
         imported_context = self._build_imported_context(project_id=project_id, import_ids=resolved_import_ids)
         proposal = self._build_proposal(source_plan=source_plan, execution_mode=normalized_mode, imported_context=imported_context)
+        proposal["context_source"] = context_source
         execution = self.store.create_execution(
             project_id=project_id,
             debate_id=normalized_debate_id,

@@ -176,3 +176,90 @@ def test_executor_service_rejects_unknown_mode(isolated_workspace_env):
     service = _executor_service(isolated_workspace_env)
     with pytest.raises(ValueError, match="execution_mode"):
         service.create_execution(project_id="forge", plan="Inspect the store.", execution_mode="bad_mode")
+
+
+def test_executor_service_inherits_debate_context_import_ids(isolated_workspace_env):
+    """When context_import_ids is not provided, execution inherits from the debate record."""
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    imp = store.create_context_import(project_id="forge", source_label="Guide", content="Important context.", category="reference")
+    debate = store.create_debate(
+        project_id="forge",
+        topic="Context inheritance test",
+        bottlenecks="",
+        files=[],
+        participants=[],
+        max_rounds=1,
+        judge_provider="openai",
+        context_import_ids=[imp["import_id"]],
+    )
+    store.finalize_debate(debate_id=debate["debate_id"], final_plan={"content": "Run the suite."}, status="completed")
+    service = ExecutorService(store=store)
+
+    # No context_import_ids passed — backend should inherit from debate
+    result = service.create_execution(project_id="forge", debate_id=debate["debate_id"])
+    execution = result["execution"]
+
+    assert result["status"] == "ok"
+    assert imp["import_id"] in execution["context_import_ids"]
+    assert execution["proposal"]["context_source"] == "inherited"
+
+
+def test_executor_service_context_override_supersedes_debate(isolated_workspace_env):
+    """Explicit context_import_ids override the debate's stored context_import_ids."""
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    imp_a = store.create_context_import(project_id="forge", source_label="A", content="Context A.", category="reference")
+    imp_b = store.create_context_import(project_id="forge", source_label="B", content="Context B.", category="reference")
+    debate = store.create_debate(
+        project_id="forge",
+        topic="Override test",
+        bottlenecks="",
+        files=[],
+        participants=[],
+        max_rounds=1,
+        judge_provider="openai",
+        context_import_ids=[imp_a["import_id"]],
+    )
+    store.finalize_debate(debate_id=debate["debate_id"], final_plan={"content": "Run checks."}, status="completed")
+    service = ExecutorService(store=store)
+
+    # Explicitly pass imp_b only — override the debate's imp_a selection
+    result = service.create_execution(
+        project_id="forge",
+        debate_id=debate["debate_id"],
+        context_import_ids=[imp_b["import_id"]],
+    )
+    execution = result["execution"]
+
+    assert execution["context_import_ids"] == [imp_b["import_id"]]
+    assert imp_a["import_id"] not in execution["context_import_ids"]
+    assert execution["proposal"]["context_source"] == "override"
+
+
+def test_executor_service_debate_with_no_context_import_ids_is_inherited_empty(isolated_workspace_env):
+    """Debate with no context_import_ids → inherited source, empty resolved IDs (falls back to all enabled)."""
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    debate = store.create_debate(
+        project_id="forge",
+        topic="No context debate",
+        bottlenecks="",
+        files=[],
+        participants=[],
+        max_rounds=1,
+        judge_provider="openai",
+    )
+    store.finalize_debate(debate_id=debate["debate_id"], final_plan={"content": "Plan here."}, status="completed")
+    service = ExecutorService(store=store)
+
+    result = service.create_execution(project_id="forge", debate_id=debate["debate_id"])
+    execution = result["execution"]
+
+    assert execution["proposal"]["context_source"] == "inherited"
+    assert execution["context_import_ids"] == []
+
+
+def test_executor_service_manual_plan_context_source_is_manual(isolated_workspace_env):
+    """Execution from a standalone plan (no debate_id) → context_source = 'manual'."""
+    service = _executor_service(isolated_workspace_env)
+    result = service.create_execution(project_id="forge", plan="Review the architecture.")
+    execution = result["execution"]
+    assert execution["proposal"]["context_source"] == "manual"
