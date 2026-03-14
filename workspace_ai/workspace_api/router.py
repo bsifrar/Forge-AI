@@ -50,7 +50,7 @@ def build_router(manager: SessionManager) -> APIRouter:
                 project_id=request.project_id,
                 topic=request.topic,
                 bottlenecks=request.bottlenecks,
-                files=request.files,
+                files=[item.model_dump() if hasattr(item, "model_dump") else item for item in request.files],
                 participants=[participant.model_dump() for participant in request.participants],
                 max_rounds=request.max_rounds,
                 judge_provider=request.judge_provider,
@@ -72,7 +72,12 @@ def build_router(manager: SessionManager) -> APIRouter:
     @router.post("/executions")
     def create_execution(request: ExecutionCreateRequest) -> dict:
         try:
-            return manager.create_execution(project_id=request.project_id, debate_id=request.debate_id, plan=request.plan)
+            return manager.create_execution(
+                project_id=request.project_id,
+                debate_id=request.debate_id,
+                plan=request.plan,
+                execution_mode=request.execution_mode,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

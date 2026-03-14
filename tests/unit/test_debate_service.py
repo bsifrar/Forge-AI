@@ -49,6 +49,31 @@ class _FailProvider:
         raise RuntimeError(self.error)
 
 
+class _CaptureProvider:
+    def __init__(self, *, provider_name: str, content: str, prompts: List[str]) -> None:
+        self.provider_name = provider_name
+        self.content = content
+        self.prompts = prompts
+
+    def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        conversation: List[Dict[str, str]] | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+    ) -> Dict[str, Any]:
+        self.prompts.append(user_prompt)
+        return {
+            "content": self.content,
+            "provider": self.provider_name,
+            "model": model or "test-model",
+            "mode": "mock",
+            "usage": {},
+        }
+
+
 def _debate_service(isolated_workspace_env) -> DebateService:
     store = SessionStore(db_path=str(isolated_workspace_env))
     settings_service = SettingsService(store=store)
@@ -107,5 +132,124 @@ def test_debate_service_continues_when_one_provider_errors(monkeypatch, isolated
     assert debate["status"] == "max_rounds"
     assert len(debate["rounds"]) == 2
     assert any((round_item.get("response") or {}).get("mode") == "error" for round_item in debate["rounds"])
-    assert debate["final_plan"]["content"] == "openai response"
+    assert debate["final_plan"]["structured"]["plan"] == "openai response"
     assert any("xai timeout" in warning for warning in debate["final_plan"].get("warnings", []))
+
+
+def test_debate_service_normalizes_structured_rounds_and_final_plan(monkeypatch, isolated_workspace_env):
+    service = _debate_service(isolated_workspace_env)
+
+    def fake_get_provider(provider_name: str, *, api_key: str | None = None, model: str | None = None):
+        if provider_name == "openai":
+            return _MockProvider(
+                provider_name=provider_name,
+                content='{"proposal":"Use a bounded JSON debate loop.","rationale":"It is easier to parse and judge.","risks":["Schema drift"],"confidence":0.82,"agreed":true}',
+            )
+        return _MockProvider(
+            provider_name=provider_name,
+            content='{"plan":"Use a bounded JSON debate loop.","rationale":"Both providers converged on structured output.","risks":["Need migration for old rows"],"confidence":0.77,"agreed":true}',
+        )
+
+    monkeypatch.setattr("workspace_ai.workspace_runtime.debate_service.get_provider", fake_get_provider)
+
+    result = service.start_debate(
+        project_id="forge",
+        topic="Structured debate output",
+        participants=[{"provider": "openai", "model": "test-model"}],
+        max_rounds=2,
+        judge_provider="xai",
+    )
+
+    debate = result["debate"]
+    round_payload = debate["rounds"][0]["response"]["structured"]
+    final_payload = debate["final_plan"]["structured"]
+
+    assert debate["status"] == "completed"
+    assert round_payload["proposal"] == "Use a bounded JSON debate loop."
+    assert round_payload["risks"] == ["Schema drift"]
+    assert round_payload["agreed"] is True
+    assert final_payload["plan"] == "Use a bounded JSON debate loop."
+    assert final_payload["risks"] == ["Need migration for old rows"]
+    assert "Confidence: 0.77" in debate["final_plan"]["content"]
+
+
+def test_debate_service_includes_local_artifact_previews(monkeypatch, isolated_workspace_env, tmp_path):
+    service = _debate_service(isolated_workspace_env)
+    artifact_path = tmp_path / "sample_module.py"
+    artifact_path.write_text("def run():\n    return 'forge'\n", encoding="utf-8")
+    prompts: List[str] = []
+
+    def fake_get_provider(provider_name: str, *, api_key: str | None = None, model: str | None = None):
+        if provider_name == "openai":
+            return _CaptureProvider(
+                provider_name=provider_name,
+                prompts=prompts,
+                content='{"proposal":"Inspect sample_module.py before editing.","rationale":"The preview shows the current implementation.","risks":[],"confidence":0.7,"agreed":true}',
+            )
+        return _MockProvider(
+            provider_name=provider_name,
+            content='{"plan":"Inspect sample_module.py before editing.","rationale":"The artifact preview grounded the decision.","risks":[],"confidence":0.7,"agreed":true}',
+        )
+
+    monkeypatch.setattr("workspace_ai.workspace_runtime.debate_service.get_provider", fake_get_provider)
+
+    result = service.start_debate(
+        project_id="forge",
+        topic="Use local file context",
+        files=[str(artifact_path)],
+        participants=[{"provider": "openai", "model": "test-model"}],
+        judge_provider="xai",
+        max_rounds=1,
+    )
+
+    debate = result["debate"]
+    assert debate["files"][0]["exists"] is True
+    assert debate["files"][0]["kind"] == "text"
+    assert "sample_module.py" in debate["files"][0]["path"]
+    assert "def run()" in debate["files"][0]["preview"]
+    assert prompts
+    assert "Artifacts:" in prompts[0]
+    assert "Preview: def run():" in prompts[0]
+
+
+def test_debate_service_accepts_prebuilt_artifact_payloads(monkeypatch, isolated_workspace_env):
+    service = _debate_service(isolated_workspace_env)
+    prompts: List[str] = []
+
+    def fake_get_provider(provider_name: str, *, api_key: str | None = None, model: str | None = None):
+        if provider_name == "openai":
+            return _CaptureProvider(
+                provider_name=provider_name,
+                prompts=prompts,
+                content='{"proposal":"Use uploaded browser artifact preview.","rationale":"The artifact preview is already embedded.","risks":[],"confidence":0.71,"agreed":true}',
+            )
+        return _MockProvider(
+            provider_name=provider_name,
+            content='{"plan":"Use uploaded browser artifact preview.","rationale":"The preview grounded the plan.","risks":[],"confidence":0.71,"agreed":true}',
+        )
+
+    monkeypatch.setattr("workspace_ai.workspace_runtime.debate_service.get_provider", fake_get_provider)
+
+    result = service.start_debate(
+        project_id="forge",
+        topic="Browser-selected file context",
+        files=[
+            {
+                "path": "notes.txt",
+                "label": "notes.txt",
+                "exists": True,
+                "kind": "text",
+                "size_bytes": 42,
+                "preview": "Uploaded from the browser picker.",
+            }
+        ],
+        participants=[{"provider": "openai", "model": "test-model"}],
+        judge_provider="xai",
+        max_rounds=1,
+    )
+
+    debate = result["debate"]
+    assert debate["files"][0]["label"] == "notes.txt"
+    assert debate["files"][0]["preview"] == "Uploaded from the browser picker."
+    assert prompts
+    assert "Preview: Uploaded from the browser picker." in prompts[0]

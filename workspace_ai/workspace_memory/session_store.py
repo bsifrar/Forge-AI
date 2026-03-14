@@ -312,7 +312,7 @@ class SessionStore:
         project_id: str,
         topic: str,
         bottlenecks: str,
-        files: List[str],
+        files: List[Dict[str, Any]],
         participants: List[Dict[str, Any]],
         max_rounds: int,
         judge_provider: str,
@@ -414,7 +414,7 @@ class SessionStore:
         if not row:
             return None
         parsed = dict(row)
-        parsed["files"] = json.loads(parsed.pop("files_json", "[]"))
+        parsed["files"] = self._normalize_debate_files(json.loads(parsed.pop("files_json", "[]")))
         parsed["participants"] = json.loads(parsed.pop("participants_json", "[]"))
         parsed["max_rounds"] = int(parsed.get("max_rounds") or 5)
         parsed["final_plan"] = json.loads(parsed.pop("final_plan_json", "{}"))
@@ -437,6 +437,36 @@ class SessionStore:
             if debate is not None:
                 out.append(debate)
         return out
+
+    @staticmethod
+    def _normalize_debate_files(files: Any) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for item in files or []:
+            if isinstance(item, dict):
+                normalized.append(
+                    {
+                        "path": str(item.get("path") or "").strip(),
+                        "label": str(item.get("label") or item.get("path") or "artifact").strip(),
+                        "exists": bool(item.get("exists")),
+                        "kind": str(item.get("kind") or "unknown").strip(),
+                        "size_bytes": int(item.get("size_bytes") or 0),
+                        "preview": str(item.get("preview") or "").strip(),
+                    }
+                )
+            else:
+                value = str(item or "").strip()
+                if value:
+                    normalized.append(
+                        {
+                            "path": value,
+                            "label": value.rsplit("/", 1)[-1],
+                            "exists": False,
+                            "kind": "legacy",
+                            "size_bytes": 0,
+                            "preview": "",
+                        }
+                    )
+        return normalized
 
     def create_execution(
         self,

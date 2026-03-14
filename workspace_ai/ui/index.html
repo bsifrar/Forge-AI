@@ -549,7 +549,9 @@
             <input id="debateProjectId" value="forge" placeholder="Project ID" />
             <input id="debateTopic" placeholder="Debate topic" />
             <textarea id="debateBottlenecks" placeholder="Current bottlenecks or constraints..."></textarea>
-            <input id="debateFiles" placeholder="Optional file paths (comma-separated)" />
+            <div class="field-label">Artifacts</div>
+            <input id="debateFilePicker" type="file" multiple />
+            <div id="debateFileSummary" class="help-text">No local artifacts selected.</div>
             <input id="debateMaxRounds" type="number" min="1" max="20" value="5" placeholder="Max rounds" />
             <div class="field-label">Participants</div>
             <select id="debateParticipants" multiple>
@@ -713,6 +715,65 @@
 
     function debateDefaultsStorageKey() {
       return "forge.debate.defaults";
+    }
+
+    function selectedDebateFiles() {
+      const input = document.getElementById("debateFilePicker");
+      if (!input || !input.files) return [];
+      return Array.from(input.files);
+    }
+
+    function updateDebateFileSummary() {
+      const summaryEl = document.getElementById("debateFileSummary");
+      if (!summaryEl) return;
+      const files = selectedDebateFiles();
+      if (!files.length) {
+        summaryEl.textContent = "No local artifacts selected.";
+        return;
+      }
+      const labels = files.slice(0, 3).map(file => `${file.name} (${formatBytes(file.size)})`);
+      const overflow = files.length > 3 ? ` +${files.length - 3} more` : "";
+      summaryEl.textContent = `Selected ${files.length} artifact(s): ${labels.join(", ")}${overflow}`;
+    }
+
+    async function buildSelectedDebateArtifacts() {
+      const files = selectedDebateFiles();
+      const artifacts = [];
+      for (const file of files) {
+        const artifact = await buildBrowserArtifact(file);
+        artifacts.push(artifact);
+      }
+      return artifacts;
+    }
+
+    async function buildBrowserArtifact(file) {
+      const maxPreviewChars = 1200;
+      const maxBytes = 64000;
+      const artifact = {
+        path: file.name || "artifact",
+        label: file.name || "artifact",
+        exists: true,
+        kind: "binary",
+        size_bytes: Number(file.size || 0),
+        preview: "",
+      };
+      const sample = await file.slice(0, maxBytes).arrayBuffer();
+      const bytes = new Uint8Array(sample);
+      const hasNull = bytes.some(byte => byte === 0);
+      if (hasNull) {
+        return artifact;
+      }
+      const text = await file.slice(0, maxBytes).text();
+      const cleaned = text
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .join(" ");
+      artifact.kind = "text";
+      artifact.preview = cleaned.length > maxPreviewChars
+        ? `${cleaned.slice(0, maxPreviewChars).trimEnd()}...`
+        : cleaned;
+      return artifact;
     }
 
     function saveDraftValue() {
@@ -1140,9 +1201,10 @@
           <div class="help-text">Participants: ${esc((debate.participants || []).map(item => `${item.provider || "unknown"} (${item.model || "default"})`).join(", ") || "none")}</div>
           <div class="help-text">Rounds: ${esc((debate.rounds || []).length)} / ${esc(debate.max_rounds || 5)}</div>
           ${(debate.bottlenecks || "").trim() ? `<div class="help-text" style="margin-top:8px;"><strong>Bottlenecks</strong>: ${esc(debate.bottlenecks)}</div>` : ""}
+          ${renderDebateArtifacts(debate.files || [])}
           <div class="debate-section">
             <h4>Final Plan</h4>
-            <div class="debate-content">${esc((debate.final_plan || {}).content || "No plan available.")}</div>
+            ${renderStructuredFinalPlan(debate.final_plan || {})}
           </div>
           ${renderDebateExecution(debate)}
           <div class="debate-section">
@@ -1150,7 +1212,7 @@
             ${(debate.rounds || []).map(round => `
               <div class="context-item" style="margin-top:8px;">
                 <div class="type">Round ${esc(round.round_index)} · ${esc(round.participant_provider || "unknown")} · ${esc(round.participant_model || "default")}</div>
-                <div class="debate-content">${esc((round.response || {}).content || "No content.")}</div>
+                ${renderStructuredRound(round.response || {})}
               </div>
             `).join("") || `<div class="muted">No rounds recorded.</div>`}
           </div>
@@ -1162,6 +1224,64 @@
       `).join("");
     }
 
+    function renderDebateArtifacts(files = []) {
+      if (!Array.isArray(files) || !files.length) return "";
+      return `
+        <div class="debate-section">
+          <h4>Artifacts</h4>
+          ${files.map(file => `
+            <div class="context-item" style="margin-top:8px;">
+              <div class="type">${esc(file.label || file.path || "artifact")} · ${esc(file.kind || "unknown")} · ${file.exists ? "available" : "missing"}</div>
+              <div class="help-text">${esc(file.path || "")}${file.size_bytes ? ` · ${esc(formatBytes(file.size_bytes))}` : ""}</div>
+              ${file.preview ? `<div class="debate-content" style="margin-top:8px;"><strong>Preview</strong><br />${esc(file.preview)}</div>` : ""}
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    function renderStructuredFinalPlan(finalPlan = {}) {
+      const structured = finalPlan.structured || null;
+      if (!structured) {
+        return `<div class="debate-content">${esc(finalPlan.content || "No plan available.")}</div>`;
+      }
+      const risks = Array.isArray(structured.risks) ? structured.risks.filter(Boolean) : [];
+      return `
+        <div class="debate-content"><strong>Plan</strong><br />${esc(structured.plan || "No plan available.")}</div>
+        <div class="debate-content" style="margin-top:8px;"><strong>Rationale</strong><br />${esc(structured.rationale || "No rationale provided.")}</div>
+        <div class="help-text" style="margin-top:8px;">Confidence: ${esc(formatConfidence(structured.confidence))} · Agreed: ${structured.agreed ? "yes" : "no"}</div>
+        <div class="debate-content" style="margin-top:8px;"><strong>Risks</strong><br />${risks.length ? risks.map(item => `- ${esc(item)}`).join("<br />") : "none"}</div>
+      `;
+    }
+
+    function renderStructuredRound(response = {}) {
+      const structured = response.structured || null;
+      if (!structured) {
+        return `<div class="debate-content">${esc(response.content || "No content.")}</div>`;
+      }
+      const risks = Array.isArray(structured.risks) ? structured.risks.filter(Boolean) : [];
+      return `
+        <div class="debate-content"><strong>Proposal</strong><br />${esc(structured.proposal || "No proposal provided.")}</div>
+        <div class="debate-content" style="margin-top:8px;"><strong>Rationale</strong><br />${esc(structured.rationale || "No rationale provided.")}</div>
+        <div class="help-text" style="margin-top:8px;">Confidence: ${esc(formatConfidence(structured.confidence))} · Agreed: ${structured.agreed ? "yes" : "no"}</div>
+        <div class="debate-content" style="margin-top:8px;"><strong>Risks</strong><br />${risks.length ? risks.map(item => `- ${esc(item)}`).join("<br />") : "none"}</div>
+      `;
+    }
+
+    function formatConfidence(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return "0.50";
+      return Math.max(0, Math.min(1, numeric)).toFixed(2);
+    }
+
+    function formatBytes(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) return "0 B";
+      if (numeric < 1024) return `${numeric} B`;
+      if (numeric < 1024 * 1024) return `${(numeric / 1024).toFixed(1)} KB`;
+      return `${(numeric / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
     function renderDebateExecution(debate) {
       const execution = state.executionsByDebateId[debate.debate_id] || null;
       const pending = Boolean(state.executionPending[debate.debate_id]);
@@ -1171,8 +1291,11 @@
             <h4>Execution</h4>
             <div class="muted">No execution proposal created for this debate yet.</div>
             <div class="debate-actions" style="margin-top:10px;">
-              <button ${pending ? "disabled" : ""} onclick="createExecutionFromDebate('${esc(debate.debate_id || "")}')">
-                ${pending ? "Creating..." : "Create Execution"}
+              <button ${pending ? "disabled" : ""} onclick="createExecutionFromDebate('${esc(debate.debate_id || "")}', 'read_only_v1')">
+                ${pending ? "Creating..." : "Create Review Execution"}
+              </button>
+              <button class="secondary" ${pending ? "disabled" : ""} onclick="createExecutionFromDebate('${esc(debate.debate_id || "")}', 'change_plan_v1')">
+                ${pending ? "Creating..." : "Create Change Plan"}
               </button>
             </div>
           </div>
@@ -1183,11 +1306,22 @@
       const proposalSteps = Array.isArray(proposal.steps) ? proposal.steps : [];
       const resultSteps = Array.isArray(result.steps) ? result.steps : [];
       const executionContent = result.result || "";
+      const executionArtifacts = Array.isArray(proposal.source?.artifacts) ? proposal.source.artifacts : [];
+      const commands = Array.isArray(result.commands) ? result.commands : (Array.isArray(proposal.commands) ? proposal.commands : []);
+      const patchPlan = result.patch_plan || proposal.patch_plan || null;
+      const patchDraft = result.patch_draft || proposal.patch_draft || "";
       return `
         <div class="debate-section">
           <h4>Execution</h4>
           <div class="help-text">Status: ${esc(execution.status || "unknown")} · Mode: ${esc(proposal.mode || result.mode || "unknown")}</div>
           ${proposal.summary ? `<div class="debate-content" style="margin-top:8px;">${esc(proposal.summary)}</div>` : ""}
+          ${proposal.artifact_summary ? `<div class="help-text" style="margin-top:8px;">${esc(proposal.artifact_summary)}</div>` : ""}
+          ${executionArtifacts.length ? `
+            <div style="margin-top:10px;">
+              <strong style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Execution Artifacts</strong>
+              ${renderDebateArtifacts(executionArtifacts)}
+            </div>
+          ` : ""}
           ${proposalSteps.length ? `
             <div class="context-list" style="margin-top:10px;">
               ${proposalSteps.map(step => `
@@ -1196,6 +1330,39 @@
                   <div>${esc(step.summary || "")}</div>
                 </div>
               `).join("")}
+            </div>
+          ` : ""}
+          ${commands.length ? `
+            <div style="margin-top:10px;">
+              <strong style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Suggested Commands</strong>
+              <div class="context-list">
+                ${commands.map(command => `
+                  <div class="context-item"><code>${esc(command)}</code></div>
+                `).join("")}
+              </div>
+            </div>
+          ` : ""}
+          ${patchPlan ? `
+            <div style="margin-top:10px;">
+              <strong style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Patch Plan</strong>
+              <div class="help-text">Format: ${esc(patchPlan.format || "unknown")}</div>
+              <div class="context-list" style="margin-top:8px;">
+                ${(Array.isArray(patchPlan.hunks) ? patchPlan.hunks : []).map(hunk => `
+                  <div class="context-item">
+                    <div class="type">${esc(hunk.target || "[select target file]")}</div>
+                    <div>${esc(hunk.change_summary || "")}</div>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          ` : ""}
+          ${patchDraft ? `
+            <div style="margin-top:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px;">
+                <strong style="display:block; font-size:12px; color:var(--muted);">Patch Draft</strong>
+                <button class="secondary" onclick='copyText(decodeURIComponent(${JSON.stringify(encodeURIComponent(patchDraft))}), "Patch draft copied.")'>Copy Patch Draft</button>
+              </div>
+              <pre>${esc(patchDraft)}</pre>
             </div>
           ` : ""}
           ${executionContent ? `
@@ -1516,7 +1683,7 @@
       }
     }
 
-    async function createExecutionFromDebate(debateId) {
+    async function createExecutionFromDebate(debateId, executionMode = "read_only_v1") {
       if (!debateId) return;
       state.executionPending[debateId] = true;
       renderDebates(state.debates || []);
@@ -1528,10 +1695,11 @@
             project_id: debate.project_id || document.getElementById("debateProjectId").value.trim() || "forge",
             debate_id: debateId,
             plan: "",
+            execution_mode: executionMode,
           }),
         });
-        document.getElementById("debateStatus").textContent = `Execution proposal created for ${debateId}.`;
-        showToast("Execution proposal created.");
+        document.getElementById("debateStatus").textContent = `Execution proposal created for ${debateId} in ${executionMode}.`;
+        showToast(`Execution proposal created: ${executionMode}.`);
         await loadDebates();
       } catch (error) {
         const message = parseError(error);
@@ -1793,10 +1961,6 @@
       const projectId = document.getElementById("debateProjectId").value.trim() || "forge";
       const topic = document.getElementById("debateTopic").value.trim();
       const bottlenecks = document.getElementById("debateBottlenecks").value.trim();
-      const files = document.getElementById("debateFiles").value
-        .split(",")
-        .map(item => item.trim())
-        .filter(Boolean);
       const maxRounds = Number(document.getElementById("debateMaxRounds").value || 5);
       const participantSelect = document.getElementById("debateParticipants");
       const participants = Array.from(participantSelect.selectedOptions).map(option => JSON.parse(option.value));
@@ -1818,6 +1982,7 @@
       if (startBtn) startBtn.disabled = true;
       statusEl.textContent = "Starting debate...";
       try {
+        const files = await buildSelectedDebateArtifacts();
         const payload = await api("/workspace/debates", {
           method: "POST",
           body: JSON.stringify({
@@ -1836,13 +2001,13 @@
             project_id: projectId,
             max_rounds: maxRounds,
             judge_provider: judgeProvider,
-            files: document.getElementById("debateFiles").value,
             bottlenecks,
           })
         );
         document.getElementById("debateTopic").value = "";
         document.getElementById("debateBottlenecks").value = "";
-        document.getElementById("debateFiles").value = "";
+        document.getElementById("debateFilePicker").value = "";
+        updateDebateFileSummary();
         statusEl.textContent = `Debate completed: ${payload.debate?.debate_id || "unknown"}`;
         await loadDebates();
         showToast("Debate completed.");
@@ -1934,16 +2099,17 @@
         sendPrompt();
       }
     });
+    document.getElementById("debateFilePicker").addEventListener("change", updateDebateFileSummary);
 
     toggleImportLimit();
     restoreUIState();
     restoreDraftValue();
+    updateDebateFileSummary();
     try {
       const savedDebateDefaults = JSON.parse(localStorage.getItem(debateDefaultsStorageKey()) || "{}");
       if (savedDebateDefaults.project_id) document.getElementById("debateProjectId").value = savedDebateDefaults.project_id;
       if (savedDebateDefaults.max_rounds) document.getElementById("debateMaxRounds").value = savedDebateDefaults.max_rounds;
       if (savedDebateDefaults.judge_provider) document.getElementById("debateJudge").value = savedDebateDefaults.judge_provider;
-      if (savedDebateDefaults.files) document.getElementById("debateFiles").value = savedDebateDefaults.files;
       if (savedDebateDefaults.bottlenecks) document.getElementById("debateBottlenecks").value = savedDebateDefaults.bottlenecks;
     } catch (error) {
       localStorage.removeItem(debateDefaultsStorageKey());

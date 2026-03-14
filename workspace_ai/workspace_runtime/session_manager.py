@@ -58,8 +58,13 @@ class SessionManager:
     def get_execution(self, *, execution_id: str) -> Dict[str, Any]:
         return self.executor_service.get_execution(execution_id=execution_id)
 
-    def create_execution(self, *, project_id: str, debate_id: str | None = None, plan: str = "") -> Dict[str, Any]:
-        result = self.executor_service.create_execution(project_id=project_id, debate_id=debate_id, plan=plan)
+    def create_execution(self, *, project_id: str, debate_id: str | None = None, plan: str = "", execution_mode: str = "read_only_v1") -> Dict[str, Any]:
+        result = self.executor_service.create_execution(
+            project_id=project_id,
+            debate_id=debate_id,
+            plan=plan,
+            execution_mode=execution_mode,
+        )
         execution = result.get("execution")
         if isinstance(execution, dict):
             self.stream_manager.publish(

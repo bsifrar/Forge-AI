@@ -16,11 +16,20 @@ class DebateParticipantRequest(BaseModel):
     model: str | None = Field(default=None)
 
 
+class DebateArtifactRequest(BaseModel):
+    path: str = Field(min_length=1)
+    label: str = Field(default="")
+    exists: bool = Field(default=True)
+    kind: str = Field(default="text")
+    size_bytes: int = Field(default=0, ge=0)
+    preview: str = Field(default="", max_length=1200)
+
+
 class DebateCreateRequest(BaseModel):
     project_id: str = Field(min_length=1)
     topic: str = Field(min_length=1)
     bottlenecks: str = Field(default="")
-    files: List[str] = Field(default_factory=list)
+    files: List[str | DebateArtifactRequest] = Field(default_factory=list)
     participants: List[DebateParticipantRequest] = Field(default_factory=list)
     max_rounds: int = Field(default=5, ge=1, le=20)
     judge_provider: str | None = Field(default=None, pattern="^(openai|xai)$")
@@ -30,6 +39,7 @@ class ExecutionCreateRequest(BaseModel):
     project_id: str = Field(min_length=1)
     debate_id: str | None = Field(default=None)
     plan: str = Field(default="", max_length=12000)
+    execution_mode: str = Field(default="read_only_v1", pattern="^(read_only_v1|change_plan_v1)$")
 
 
 class ExecutionApprovalRequest(BaseModel):

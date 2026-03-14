@@ -62,19 +62,29 @@ def test_session_store_execution_roundtrip(isolated_workspace_env):
     execution = store.create_execution(
         project_id="forge",
         debate_id="deb_123",
-        source_plan={"content": "Inspect current API flow."},
-        proposal={"summary": "Inspect current API flow.", "steps": [{"step": 1, "summary": "Inspect current API flow."}]},
+        source_plan={
+            "content": "Inspect current API flow.",
+            "artifacts": [{"path": "/tmp/spec.md", "label": "spec.md", "exists": False, "kind": "missing", "size_bytes": 0, "preview": ""}],
+        },
+        proposal={
+            "summary": "Inspect current API flow.",
+            "artifact_summary": "Artifacts: spec.md [missing]",
+            "steps": [{"step": 1, "summary": "Inspect current API flow."}],
+            "source": {"artifacts": [{"path": "/tmp/spec.md", "label": "spec.md", "exists": False, "kind": "missing", "size_bytes": 0, "preview": ""}]},
+        },
     )
     assert execution["status"] == "pending_approval"
     assert execution["debate_id"] == "deb_123"
+    assert execution["proposal"]["source"]["artifacts"][0]["label"] == "spec.md"
 
     updated = store.update_execution(
         execution_id=execution["execution_id"],
         status="completed",
-        execution={"result": "Recorded only", "applied": False},
+        execution={"result": "Recorded only", "applied": False, "artifacts": [{"label": "spec.md"}]},
         approval_note="approved for review mode",
     )
     assert updated is not None
     assert updated["status"] == "completed"
     assert updated["execution"]["result"] == "Recorded only"
+    assert updated["execution"]["artifacts"][0]["label"] == "spec.md"
     assert updated["approval_note"] == "approved for review mode"
