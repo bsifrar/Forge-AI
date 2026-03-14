@@ -350,6 +350,46 @@
       line-height: 1.45;
       font-size: 13px;
     }
+    .debate-section summary {
+      cursor: pointer;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--muted);
+      user-select: none;
+      list-style: none;
+      margin-bottom: 6px;
+    }
+    .debate-section summary::-webkit-details-marker { display: none; }
+    .debate-section summary::before { content: "▸ "; font-size: 10px; }
+    details[open].debate-section summary::before { content: "▾ "; }
+    .mediation-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .mediation-col {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(255,255,255,0.5);
+      min-width: 0;
+    }
+    .mediation-col-header {
+      font-size: 12px;
+      font-weight: bold;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+    .mediation-diff-item {
+      font-size: 13px;
+      line-height: 1.45;
+      white-space: pre-line;
+      padding: 6px 8px;
+      border-left: 3px solid var(--accent-soft);
+      margin-bottom: 6px;
+    }
     .toast {
       position: fixed;
       right: 24px;
@@ -1326,6 +1366,12 @@
             <h4>Final Plan</h4>
             ${renderStructuredFinalPlan(debate.final_plan || {})}
           </div>
+          <details class="debate-section" ontoggle="if(this.open)openMediation('${esc(debate.debate_id||'')}')">
+            <summary>Side-by-Side Mediation</summary>
+            <div id="mediation-${esc(debate.debate_id||'')}">
+              <div class="help-text" style="margin-top:8px;padding-bottom:4px;">Expand to load mediation view.</div>
+            </div>
+          </details>
           ${renderDebateExecution(debate)}
           <div class="debate-section">
             <h4>Rounds</h4>
@@ -1538,6 +1584,138 @@
 
     async function copyExecutionResult(content) {
       await copyText(String(content || ""), "Execution result copied.");
+    }
+
+    async function openMediation(debateId) {
+      const container = document.getElementById(`mediation-${debateId}`);
+      if (!container) return;
+      if (!state.mediation) state.mediation = {};
+      if (state.mediation[debateId]) {
+        renderMediationResult(container, state.mediation[debateId]);
+        return;
+      }
+      container.innerHTML = '<div class="help-text" style="padding-top:8px;">Loading…</div>';
+      try {
+        const resp = await fetch(`/workspace/debates/${encodeURIComponent(debateId)}/mediation`);
+        if (!resp.ok) { container.innerHTML = `<div class="help-text">Error ${resp.status}</div>`; return; }
+        const data = await resp.json();
+        state.mediation[debateId] = data.mediation;
+        renderMediationResult(container, data.mediation);
+      } catch (err) {
+        container.innerHTML = `<div class="help-text">Failed: ${esc(err.message)}</div>`;
+      }
+    }
+
+    function renderMediationResult(container, med) {
+      const debateId = med.debate_id || '';
+      const cols = (med.participants || []).map((p, i) => {
+        const l = p.latest || {};
+        const risks = (l.risks || []).join(', ') || 'none';
+        return `
+          <div class="mediation-col">
+            <div class="mediation-col-header">${esc(p.label)} · ${esc(p.provider)}${p.model ? ` / ${esc(p.model)}` : ''}</div>
+            <div class="debate-content"><strong>Proposal</strong><br />${esc(l.proposal || '[none]')}</div>
+            <div class="debate-content" style="margin-top:6px;"><strong>Rationale</strong><br />${esc(l.rationale || '[none]')}</div>
+            <div class="help-text" style="margin-top:6px;">Risks: ${esc(risks)}</div>
+            <div class="help-text">Confidence: ${formatConfidence(l.confidence)} · Agreed: ${l.agreed ? 'yes' : 'no'}</div>
+            <div class="debate-actions" style="margin-top:8px;">
+              <button class="secondary" onclick="copyMediationParticipant(${JSON.stringify(debateId)}, ${i})">Copy ${esc(p.label)}</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const j = med.judge || {};
+      const judgeCol = `
+        <div class="mediation-col">
+          <div class="mediation-col-header">Judge${j.provider ? ` · ${esc(j.provider)}` : ''}</div>
+          <div class="debate-content"><strong>Plan</strong><br />${esc(j.plan || '[none]')}</div>
+          <div class="debate-content" style="margin-top:6px;"><strong>Rationale</strong><br />${esc(j.rationale || '[none]')}</div>
+          <div class="help-text" style="margin-top:6px;">Risks: ${esc((j.risks || []).join(', ') || 'none')}</div>
+          <div class="help-text">Confidence: ${formatConfidence(j.confidence)} · Agreed: ${j.agreed ? 'yes' : 'no'}</div>
+          <div class="debate-actions" style="margin-top:8px;">
+            <button class="secondary" onclick="copyMediationJudge(${JSON.stringify(debateId)})">Copy Judge</button>
+          </div>
+        </div>
+      `;
+
+      const diffs = (med.key_differences || []).map(d =>
+        `<div class="mediation-diff-item">${esc(d)}</div>`
+      ).join('') || '<div class="muted">No rounds available.</div>';
+
+      container.innerHTML = `
+        <div class="mediation-grid" style="margin-top:10px;">${cols}${judgeCol}</div>
+        <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--line);">
+          <h4 style="margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:0.03em; color:var(--muted);">Key Differences</h4>
+          ${diffs}
+        </div>
+        <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--line);">
+          <h4 style="margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:0.03em; color:var(--muted);">Recommended Next Step</h4>
+          <div class="debate-content">${esc(med.recommended_next_step || '')}</div>
+        </div>
+        <div class="debate-actions" style="margin-top:8px;">
+          <button class="secondary" onclick="copyMediationSummary(${JSON.stringify(debateId)})">Copy Mediation Summary</button>
+        </div>
+      `;
+    }
+
+    async function copyMediationParticipant(debateId, index) {
+      const med = (state.mediation || {})[debateId];
+      if (!med) return;
+      const p = (med.participants || [])[index];
+      if (!p) return;
+      const l = p.latest || {};
+      const text = [
+        `${p.label} · ${p.provider}${p.model ? ` / ${p.model}` : ''}`,
+        `Proposal: ${l.proposal || '[none]'}`,
+        `Rationale: ${l.rationale || '[none]'}`,
+        `Risks: ${(l.risks || []).join(', ') || 'none'}`,
+        `Confidence: ${Number(l.confidence || 0).toFixed(2)}`,
+        `Agreed: ${l.agreed ? 'yes' : 'no'}`,
+      ].join('\n');
+      await copyText(text, `${p.label} copied.`);
+    }
+
+    async function copyMediationJudge(debateId) {
+      const med = (state.mediation || {})[debateId];
+      if (!med) return;
+      const j = med.judge || {};
+      const text = [
+        `Judge${j.provider ? ` · ${j.provider}` : ''}`,
+        `Plan: ${j.plan || '[none]'}`,
+        `Rationale: ${j.rationale || '[none]'}`,
+        `Risks: ${(j.risks || []).join(', ') || 'none'}`,
+        `Confidence: ${Number(j.confidence || 0).toFixed(2)}`,
+        `Agreed: ${j.agreed ? 'yes' : 'no'}`,
+      ].join('\n');
+      await copyText(text, 'Judge summary copied.');
+    }
+
+    async function copyMediationSummary(debateId) {
+      const med = (state.mediation || {})[debateId];
+      if (!med) return;
+      const participantBlocks = (med.participants || []).map(p => {
+        const l = p.latest || {};
+        return [
+          `${p.label} (${p.provider}${p.model ? `/${p.model}` : ''})`,
+          `  Proposal: ${l.proposal || '[none]'}`,
+          `  Confidence: ${Number(l.confidence || 0).toFixed(2)} · Agreed: ${l.agreed ? 'yes' : 'no'}`,
+          `  Risks: ${(l.risks || []).join(', ') || 'none'}`,
+        ].join('\n');
+      });
+      const lines = [
+        `MEDIATION SUMMARY`,
+        `Topic: ${med.topic || ''}`,
+        ``,
+        ...participantBlocks,
+        ``,
+        `KEY DIFFERENCES`,
+        ...(med.key_differences || []),
+        ``,
+        `RECOMMENDED NEXT STEP`,
+        med.recommended_next_step || '',
+      ];
+      await copyText(lines.join('\n'), 'Mediation summary copied.');
     }
 
     async function copyHandoff(debateId, executionId) {

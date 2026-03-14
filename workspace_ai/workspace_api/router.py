@@ -108,6 +108,13 @@ def build_router(manager: SessionManager) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"Debate not found: {debate_id}")
         return payload
 
+    @router.get("/debates/{debate_id}/mediation")
+    def get_mediation(debate_id: str) -> dict:
+        result = manager.get_mediation(debate_id=debate_id)
+        if result.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=f"Debate not found: {debate_id}")
+        return result
+
     @router.get("/executions")
     def list_executions(project_id: str | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict:
         return manager.list_executions(project_id=project_id, limit=limit)

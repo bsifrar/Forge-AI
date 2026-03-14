@@ -642,3 +642,68 @@ def test_handoff_from_execution(monkeypatch, isolated_workspace_env):
     assert h["execution_mode"] == "read_only_v1"
     assert "FORGE HANDOFF PACKAGE" in h["text"]
     assert "RECOMMENDED NEXT ACTION" in h["text"]
+
+
+def test_mediation_not_found_is_404(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    resp = client.get("/workspace/debates/deb_missing/mediation")
+    assert resp.status_code == 404
+
+
+def test_mediation_returns_participant_tracks(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Mediation integration test",
+        "participants": [
+            {"provider": "openai", "model": "test-model"},
+            {"provider": "xai", "model": "grok-3"},
+        ],
+        "max_rounds": 1,
+    })
+    assert debate_resp.status_code == 200
+    debate_id = debate_resp.json()["debate"]["debate_id"]
+
+    resp = client.get(f"/workspace/debates/{debate_id}/mediation")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    med = data["mediation"]
+    assert med["debate_id"] == debate_id
+    assert med["topic"] == "Mediation integration test"
+    assert "participants" in med
+    assert "judge" in med
+    assert "key_differences" in med
+    assert "recommended_next_step" in med
+    # At least one participant track was recorded (mock may converge early)
+    assert len(med["participants"]) >= 1
+    assert med["participants"][0]["label"] == "Debate A"
+    # If two tracks, second is labeled Debate B
+    if len(med["participants"]) >= 2:
+        assert med["participants"][1]["label"] == "Debate B"
+
+
+def test_mediation_single_participant_has_no_key_differences(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Single participant",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+    })
+    debate_id = debate_resp.json()["debate"]["debate_id"]
+
+    resp = client.get(f"/workspace/debates/{debate_id}/mediation")
+    assert resp.status_code == 200
+    med = resp.json()["mediation"]
+    assert len(med["participants"]) == 1
+    assert med["key_differences"] == []
