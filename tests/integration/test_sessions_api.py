@@ -48,6 +48,10 @@ def test_settings_include_provider_selection(monkeypatch, isolated_workspace_env
     assert "xai" in payload["available_providers"]
     assert "anthropic" in payload["available_providers"]
     assert "provider_keys_configured" in payload
+    assert "model_roles" in payload
+    roles = payload["model_roles"]
+    assert set(roles.keys()) == {"chat", "debate_a", "debate_b", "judge"}
+    assert all("provider" in r and "model" in r for r in roles.values())
 
 
 def test_debate_start_and_fetch(monkeypatch, isolated_workspace_env):

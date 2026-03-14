@@ -39,9 +39,8 @@ class SessionManager:
     def settings(self) -> Dict[str, Any]:
         return {"status": "ok", "settings": self.settings_service.get()}
 
-    def _selected_provider(self) -> str:
-        settings_payload = self.settings_service.get()
-        return str(settings_payload.get("selected_provider") or "openai").strip().lower()
+    def _chat_role(self) -> Dict[str, str]:
+        return self.settings_service.model_role("chat")
 
     def adapter_status(self) -> Dict[str, Any]:
         return {"status": "ok", "adapter": self.context_service.adapter_health()}
@@ -233,8 +232,9 @@ class SessionManager:
         policy = self.policy_service.allow_live_call()
         context = self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget)
         history = self.store.list_messages(session_id=session_id, limit=40)
-        selected_model = model or str(policy["settings"]["selected_model"])
-        selected_provider = self._selected_provider()
+        chat_role = self._chat_role()
+        selected_model = model or chat_role["model"]
+        selected_provider = chat_role["provider"]
         api_key = self.settings_service.api_key(selected_provider)
         if policy["allowed"]:
             response = self.chat_service.respond(project_id=session["project_id"], prompt=content, context=context, history=history[:-1], model=selected_model, api_key=api_key, provider_name=selected_provider)
@@ -263,8 +263,9 @@ class SessionManager:
         policy = self.policy_service.allow_live_call()
         context = self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget)
         history = self.store.list_messages(session_id=session_id, limit=40)
-        selected_model = model or str(policy["settings"]["selected_model"])
-        selected_provider = self._selected_provider()
+        chat_role = self._chat_role()
+        selected_model = model or chat_role["model"]
+        selected_provider = chat_role["provider"]
         api_key = self.settings_service.api_key(selected_provider)
         collected: list[str] = []
         meta: Dict[str, Any] = {"mode": "blocked", "model": selected_model, "provider": selected_provider, "usage": {}, "policy_reason": policy["reason"]}

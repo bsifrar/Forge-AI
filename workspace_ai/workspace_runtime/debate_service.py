@@ -26,10 +26,11 @@ class DebateService:
 
     def _normalize_participants(self, participants: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
         if not participants:
-            default_model = str(self.settings_service.get().get("selected_model") or "gpt-5.4")
+            role_a = self.settings_service.model_role("debate_a")
+            role_b = self.settings_service.model_role("debate_b")
             return [
-                {"provider": "openai", "model": default_model},
-                {"provider": "xai", "model": default_model},
+                {"provider": role_a["provider"], "model": role_a["model"]},
+                {"provider": role_b["provider"], "model": role_b["model"]},
             ]
         normalized: List[Dict[str, Any]] = []
         for item in participants:
@@ -53,7 +54,8 @@ class DebateService:
     ) -> Dict[str, Any]:
         active_participants = self._normalize_participants(participants)
         bounded_rounds = max(1, min(20, int(max_rounds)))
-        normalized_judge = self._normalize_provider(judge_provider or "openai", field_name="judge_provider")
+        default_judge_provider = self.settings_service.model_role("judge")["provider"]
+        normalized_judge = self._normalize_provider(judge_provider or default_judge_provider, field_name="judge_provider")
         normalized_files = self.artifact_service.normalize_inputs(files)
         debate = self.store.create_debate(
             project_id=project_id,
@@ -187,8 +189,9 @@ class DebateService:
         )
 
     def _judge_summary(self, *, debate: Dict[str, Any], history: List[Dict[str, str]]) -> Dict[str, Any]:
-        judge_provider = str(debate.get("judge_provider") or "openai").strip().lower()
-        selected_model = str(self.settings_service.get().get("selected_model") or "").strip() or None
+        judge_role = self.settings_service.model_role("judge")
+        judge_provider = str(debate.get("judge_provider") or judge_role["provider"]).strip().lower()
+        selected_model = judge_role["model"] or str(self.settings_service.get().get("selected_model") or "").strip() or None
         latest_debate = self.store.get_debate(str(debate.get("debate_id") or "")) or debate
         structured_rounds = self._structured_history_payload(debate=latest_debate)
         try:

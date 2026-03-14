@@ -483,6 +483,39 @@
               <input id="anthropicApiKey" type="password" placeholder="Leave blank to keep existing key" style="width:100%;" />
             </div>
           </div>
+          <div style="margin-top:14px;">
+            <div class="field-label">Model Roles</div>
+            <div style="display:grid; grid-template-columns: 90px 1fr 1fr; gap:6px; align-items:center; margin-top:6px;">
+              <span class="muted" style="font-size:0.8em;">Chat</span>
+              <select id="roleChatProvider">
+                <option value="openai">OpenAI</option>
+                <option value="xai">xAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+              <input id="roleChatModel" placeholder="Model" />
+              <span class="muted" style="font-size:0.8em;">Debate A</span>
+              <select id="roleDebateAProvider">
+                <option value="openai">OpenAI</option>
+                <option value="xai">xAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+              <input id="roleDebateAModel" placeholder="Model" />
+              <span class="muted" style="font-size:0.8em;">Debate B</span>
+              <select id="roleDebateBProvider">
+                <option value="openai">OpenAI</option>
+                <option value="xai">xAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+              <input id="roleDebateBModel" placeholder="Model" />
+              <span class="muted" style="font-size:0.8em;">Judge</span>
+              <select id="roleJudgeProvider">
+                <option value="openai">OpenAI</option>
+                <option value="xai">xAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+              <input id="roleJudgeModel" placeholder="Model" />
+            </div>
+          </div>
           <div class="settings-grid" style="margin-top:10px;">
             <input id="dailyCap" type="number" step="0.01" placeholder="Daily cap" />
             <input id="hourlyCap" type="number" step="1" placeholder="Hourly cap" />
@@ -1649,6 +1682,18 @@
       if (xaiEl) xaiEl.textContent = pill(keys.xai);
       if (anthropicEl) anthropicEl.textContent = pill(keys.anthropic);
       renderProviderKeySection();
+      const roles = s.model_roles || {};
+      const setRole = (idPrefix, role) => {
+        const entry = roles[role] || {};
+        const provEl = document.getElementById(`${idPrefix}Provider`);
+        const modEl = document.getElementById(`${idPrefix}Model`);
+        if (provEl && entry.provider) provEl.value = entry.provider;
+        if (modEl && entry.model) modEl.value = entry.model;
+      };
+      setRole("roleChat", "chat");
+      setRole("roleDebateA", "debate_a");
+      setRole("roleDebateB", "debate_b");
+      setRole("roleJudge", "judge");
       document.getElementById("settingsStatus").textContent = s.api_key_configured
         ? `Settings loaded. ${s.selected_provider || "openai"} key is configured.`
         : "Settings loaded. Enter an API key for the selected provider.";
@@ -1829,6 +1874,10 @@
       }
       try {
         statusEl.textContent = options.setup ? "Running first-run setup..." : "Saving settings...";
+        const getRole = (idPrefix) => ({
+          provider: document.getElementById(`${idPrefix}Provider`)?.value || "openai",
+          model: (document.getElementById(`${idPrefix}Model`)?.value || "").trim(),
+        });
         await api("/workspace/settings", {
           method: "POST",
           body: JSON.stringify({
@@ -1842,6 +1891,12 @@
             hourly_call_cap: hourlyCap,
             price_input_per_1m_usd: inputPrice,
             price_output_per_1m_usd: outputPrice,
+            model_roles: {
+              chat:    getRole("roleChat"),
+              debate_a: getRole("roleDebateA"),
+              debate_b: getRole("roleDebateB"),
+              judge:   getRole("roleJudge"),
+            },
           }),
         });
         document.getElementById("apiKey").value = "";

@@ -41,6 +41,39 @@ class SettingsService:
             return stored.strip()
         return get_settings().openai_api_key
 
+    def _default_model_roles(self, *, selected_provider: str, selected_model: str) -> Dict[str, Any]:
+        return {
+            "chat":    {"provider": selected_provider, "model": selected_model},
+            "debate_a": {"provider": "openai",          "model": selected_model},
+            "debate_b": {"provider": "xai",             "model": selected_model},
+            "judge":   {"provider": "openai",           "model": selected_model},
+        }
+
+    def _normalize_model_roles(self, stored: Any, *, defaults: Dict[str, Any]) -> Dict[str, Any]:
+        base = stored if isinstance(stored, dict) else {}
+        result: Dict[str, Any] = {}
+        for role, default_entry in defaults.items():
+            entry = base.get(role)
+            if not isinstance(entry, dict):
+                result[role] = dict(default_entry)
+            else:
+                result[role] = {
+                    "provider": str(entry.get("provider") or default_entry["provider"]).strip().lower(),
+                    "model": str(entry.get("model") or default_entry["model"]).strip(),
+                }
+        return result
+
+    def model_role(self, role: str) -> Dict[str, str]:
+        settings = get_settings()
+        defaults = self._default_model_roles(
+            selected_provider=settings.default_provider or "openai",
+            selected_model=settings.default_model or "gpt-5.4",
+        )
+        stored = self.store.list_settings().get("model_roles")
+        roles = self._normalize_model_roles(stored, defaults=defaults)
+        entry = roles.get(role, defaults.get(role, {"provider": "openai", "model": settings.default_model or "gpt-5.4"}))
+        return {"provider": str(entry["provider"]), "model": str(entry["model"])}
+
     def get(self) -> Dict[str, Any]:
         payload = self.defaults()
         payload.update(self.store.list_settings())
@@ -58,6 +91,11 @@ class SettingsService:
             "anthropic": bool(self.api_key("anthropic")),
         }
         payload["available_providers"] = ["openai", "xai", "anthropic"]
+        defaults = self._default_model_roles(
+            selected_provider=str(payload.get("selected_provider") or "openai"),
+            selected_model=str(payload.get("selected_model") or "gpt-5.4"),
+        )
+        payload["model_roles"] = self._normalize_model_roles(payload.get("model_roles"), defaults=defaults)
         payload["usage"] = self.store.api_usage_summary()
         payload["remaining_daily_budget_usd"] = max(0.0, round(float(payload["daily_spend_cap_usd"]) - float(payload["usage"]["spent_today_usd"]), 6))
         payload["remaining_hourly_calls"] = max(0, int(payload["hourly_call_cap"]) - int(payload["usage"]["calls_this_hour"]))

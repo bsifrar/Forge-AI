@@ -65,6 +65,7 @@ class SettingsUpdateRequest(BaseModel):
     api_key: str | None = Field(default=None)
     xai_api_key: str | None = Field(default=None)
     anthropic_api_key: str | None = Field(default=None)
+    model_roles: Dict[str, Any] | None = Field(default=None)
 
 
 class ChatGPTImportRequest(BaseModel):
