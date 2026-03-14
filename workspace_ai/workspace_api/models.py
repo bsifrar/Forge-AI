@@ -108,6 +108,17 @@ class BootstrapSetupRequest(BaseModel):
     anthropic_api_key: str | None = Field(default=None)
 
 
+class ContextImportCreateRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    source_label: str = Field(default="", max_length=200)
+    content: str = Field(min_length=1, max_length=40000)
+    category: str = Field(default="reference", pattern="^(preference|project_background|reference|transient)$")
+
+
+class ContextImportEnabledRequest(BaseModel):
+    enabled: bool
+
+
 class EventListResponse(BaseModel):
     session_id: str | None = Field(default=None)
     count: int

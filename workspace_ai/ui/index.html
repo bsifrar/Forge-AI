@@ -554,6 +554,26 @@
           <pre id="contextPreviewText" style="white-space:pre-wrap; font-size:0.78em; background:var(--bg-alt,#1a1a1a); border:1px solid var(--border,#333); border-radius:4px; padding:10px; max-height:260px; overflow-y:auto; margin:0;" class="muted">Press Refresh to load preview.</pre>
         </div>
         <div class="panel">
+          <div class="toolbar">
+            <h2>Imported Context</h2>
+            <span id="contextImportCount" class="pill">0</span>
+          </div>
+          <p class="help-text" style="margin-top:4px; margin-bottom:10px;">Paste external notes, docs, or references. Enabled items are injected into every chat and debate prompt.</p>
+          <div class="create-row" style="margin-bottom:10px;">
+            <input id="importSourceLabel" placeholder="Source label (e.g. Design doc, Team norms)" style="width:100%;" />
+            <select id="importCategory">
+              <option value="reference">Reference</option>
+              <option value="preference">Preference</option>
+              <option value="project_background">Project Background</option>
+              <option value="transient">Transient Note</option>
+            </select>
+            <textarea id="importContent" rows="5" placeholder="Paste content here..." style="width:100%; resize:vertical;"></textarea>
+            <button onclick="createContextImport()">Add to Context</button>
+          </div>
+          <p id="contextImportStatus" class="help-text"></p>
+          <div id="contextImportList" style="margin-top:10px;"></div>
+        </div>
+        <div class="panel">
           <h2>First-Run Checklist</h2>
           <div id="setupChecklist" class="status-grid muted"></div>
           <p class="help-text" style="margin-top:10px;">Use First-Run Setup after entering your API key and model. It saves settings, refreshes health, and confirms Workspace is ready.</p>
@@ -1759,6 +1779,7 @@
         const lines = [
           `Chat role: ${data.chat_role?.provider || "?"} / ${data.chat_role?.model || "?"}`,
           `Debate style: ${data.debate_style || "standard"}`,
+          `Imported context items (enabled): ${data.imported_context_count ?? 0}`,
           ``,
           `── System prompt ──────────────────────────────────────────`,
           data.system_prompt || "[empty]",
@@ -1766,6 +1787,86 @@
         el.textContent = lines.join("\n");
       } catch (error) {
         el.textContent = `Error loading preview: ${parseError(error)}`;
+      }
+    }
+
+    async function loadContextImports() {
+      const projectId = document.getElementById("projectId")?.value.trim() || "workspace";
+      const countEl = document.getElementById("contextImportCount");
+      const listEl = document.getElementById("contextImportList");
+      try {
+        const data = await api(`/workspace/context-imports?project_id=${encodeURIComponent(projectId)}&limit=200`);
+        const items = data.imports || [];
+        if (countEl) countEl.textContent = items.length;
+        if (!listEl) return;
+        if (!items.length) {
+          listEl.innerHTML = `<div class="muted">No imported context yet.</div>`;
+          return;
+        }
+        listEl.innerHTML = items.map(item => `
+          <div class="context-item" style="margin-bottom:8px; padding:8px; border:1px solid var(--border,#333); border-radius:4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+              <div>
+                <strong>${esc(item.source_label || item.import_id)}</strong>
+                <span class="pill" style="margin-left:6px;">${esc(item.category)}</span>
+                ${item.enabled ? '<span class="pill" style="margin-left:4px; color:var(--accent,#4CAF50);">enabled</span>' : '<span class="pill muted" style="margin-left:4px;">disabled</span>'}
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button class="secondary" style="padding:2px 8px; font-size:0.8em;" onclick='toggleContextImport(${JSON.stringify(item.import_id)}, ${!item.enabled})'>${item.enabled ? "Disable" : "Enable"}</button>
+                <button class="secondary" style="padding:2px 8px; font-size:0.8em; color:#e57373;" onclick='deleteContextImport(${JSON.stringify(item.import_id)})'>Delete</button>
+              </div>
+            </div>
+            <div class="help-text" style="margin-top:4px; white-space:pre-wrap; max-height:80px; overflow-y:auto;">${esc(item.content.slice(0, 400))}${item.content.length > 400 ? "…" : ""}</div>
+          </div>
+        `).join("");
+      } catch (error) {
+        if (listEl) listEl.innerHTML = `<div class="muted">Error loading imports: ${esc(parseError(error))}</div>`;
+      }
+    }
+
+    async function createContextImport() {
+      const projectId = document.getElementById("projectId")?.value.trim() || "workspace";
+      const sourceLabel = document.getElementById("importSourceLabel")?.value.trim() || "";
+      const category = document.getElementById("importCategory")?.value || "reference";
+      const content = document.getElementById("importContent")?.value.trim() || "";
+      const statusEl = document.getElementById("contextImportStatus");
+      if (!content) { showToast("Content is required.", "error"); return; }
+      try {
+        await api("/workspace/context-imports", {
+          method: "POST",
+          body: JSON.stringify({ project_id: projectId, source_label: sourceLabel, content, category }),
+        });
+        document.getElementById("importContent").value = "";
+        document.getElementById("importSourceLabel").value = "";
+        showToast("Context import added.");
+        await loadContextImports();
+        loadContextPreview();
+      } catch (error) {
+        if (statusEl) statusEl.textContent = `Error: ${parseError(error)}`;
+        showToast(`Import error: ${parseError(error)}`, "error");
+      }
+    }
+
+    async function toggleContextImport(importId, enabled) {
+      try {
+        await api(`/workspace/context-imports/${encodeURIComponent(importId)}/enabled`, {
+          method: "POST",
+          body: JSON.stringify({ enabled }),
+        });
+        await loadContextImports();
+        loadContextPreview();
+      } catch (error) {
+        showToast(`Toggle error: ${parseError(error)}`, "error");
+      }
+    }
+
+    async function deleteContextImport(importId) {
+      try {
+        await api(`/workspace/context-imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
+        await loadContextImports();
+        loadContextPreview();
+      } catch (error) {
+        showToast(`Delete error: ${parseError(error)}`, "error");
       }
     }
 
@@ -1906,7 +2007,7 @@
     }
 
     async function loadAll() {
-      await Promise.all([loadStatus(), loadSettings(), loadSessions(), loadMeta(), loadDebates()]);
+      await Promise.all([loadStatus(), loadSettings(), loadSessions(), loadMeta(), loadDebates(), loadContextImports()]);
       renderStatus();
       renderSessions();
       await loadMessages();

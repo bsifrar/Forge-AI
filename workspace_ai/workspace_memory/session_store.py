@@ -134,6 +134,19 @@ class SessionStore:
                 conn.execute("ALTER TABLE debates ADD COLUMN max_rounds INTEGER NOT NULL DEFAULT 5")
             if "debate_style" not in debate_columns:
                 conn.execute("ALTER TABLE debates ADD COLUMN debate_style TEXT NOT NULL DEFAULT 'standard'")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS context_imports (
+                    import_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    source_label TEXT NOT NULL DEFAULT '',
+                    content TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT 'reference',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
 
     def create_session(self, *, project_id: str, title: str, mode: str, source: str = "workspace", external_conversation_id: str = "", external_title: str = "") -> Dict[str, Any]:
@@ -561,3 +574,81 @@ class SessionStore:
             if execution is not None:
                 out.append(execution)
         return out
+
+    # ── context_imports ───────────────────────────────────────────────────────
+
+    _VALID_IMPORT_CATEGORIES = {"preference", "project_background", "reference", "transient"}
+
+    @staticmethod
+    def _row_to_context_import(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "import_id": str(row["import_id"]),
+            "project_id": str(row["project_id"]),
+            "source_label": str(row["source_label"]),
+            "content": str(row["content"]),
+            "category": str(row["category"]),
+            "enabled": bool(int(row["enabled"])),
+            "created_at": str(row["created_at"]),
+        }
+
+    def create_context_import(
+        self,
+        *,
+        project_id: str,
+        source_label: str,
+        content: str,
+        category: str = "reference",
+    ) -> Dict[str, Any]:
+        if category not in self._VALID_IMPORT_CATEGORIES:
+            raise ValueError(f"category must be one of: {', '.join(sorted(self._VALID_IMPORT_CATEGORIES))}")
+        import_id = f"ctximp_{uuid.uuid4().hex[:12]}"
+        now = self._now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO context_imports(import_id, project_id, source_label, content, category, enabled, created_at) VALUES(?, ?, ?, ?, ?, 1, ?)",
+                (import_id, project_id, source_label.strip(), content, category, now),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM context_imports WHERE import_id = ?", (import_id,)).fetchone()
+        return self._row_to_context_import(row)
+
+    def get_context_import(self, import_id: str) -> Dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM context_imports WHERE import_id = ?", (import_id,)).fetchone()
+        return self._row_to_context_import(row) if row else None
+
+    def list_context_imports(self, *, project_id: str | None = None, limit: int = 200) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM context_imports"
+        params: list[Any] = []
+        if project_id:
+            sql += " WHERE project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(1, min(500, int(limit))))
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._row_to_context_import(r) for r in rows]
+
+    def set_context_import_enabled(self, *, import_id: str, enabled: bool) -> Dict[str, Any] | None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE context_imports SET enabled = ? WHERE import_id = ?",
+                (1 if enabled else 0, import_id),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM context_imports WHERE import_id = ?", (import_id,)).fetchone()
+        return self._row_to_context_import(row) if row else None
+
+    def delete_context_import(self, *, import_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM context_imports WHERE import_id = ?", (import_id,))
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def list_enabled_context_imports(self, *, project_id: str) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM context_imports WHERE project_id = ? AND enabled = 1 ORDER BY category ASC, created_at ASC",
+                (project_id,),
+            ).fetchall()
+        return [self._row_to_context_import(r) for r in rows]

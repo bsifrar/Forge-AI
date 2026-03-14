@@ -197,7 +197,7 @@ class DebateService:
         bottlenecks = str(debate.get("bottlenecks") or "").strip() or "[none]"
         return f"Debate topic: {debate.get('topic', '')}\nBottlenecks: {bottlenecks}\nFiles: {file_labels}"
 
-    def _instruction_context(self) -> str:
+    def _instruction_context(self, *, project_id: str = "") -> str:
         s = self.settings_service.get()
         preferences = str(s.get("personal_preferences") or "").strip()
         instructions = str(s.get("project_instructions") or "").strip()
@@ -206,6 +206,16 @@ class DebateService:
             parts.append(f"User preferences: {preferences}")
         if instructions:
             parts.append(f"Project instructions: {instructions}")
+        if project_id:
+            imported = self.settings_service.store.list_enabled_context_imports(project_id=project_id)
+            if imported:
+                from workspace_ai.workspace_runtime.context_import_service import ContextImportService, _CATEGORY_LABEL
+                lines = ["Imported context:"]
+                for item in imported:
+                    label = _CATEGORY_LABEL.get(item["category"], item["category"])
+                    source = item["source_label"] or item["import_id"]
+                    lines.append(f"[{label} — {source}]\n{item['content'].strip()}")
+                parts.append("\n\n".join(lines))
         return ("\n".join(parts) + "\n") if parts else ""
 
     def _participant_prompt(self, *, debate: Dict[str, Any], history: List[Dict[str, str]], round_index: int) -> str:
@@ -214,7 +224,7 @@ class DebateService:
         style = str(debate.get("debate_style") or "standard").strip().lower()
         style_instruction = _STYLE_CONFIGS.get(style, "")
         style_line = f"Style instruction: {style_instruction}\n" if style_instruction else ""
-        instr_context = self._instruction_context()
+        instr_context = self._instruction_context(project_id=str(debate.get("project_id") or ""))
         return (
             f"Round {round_index} debate.\n"
             f"Topic: {debate.get('topic', '')}\n"
@@ -249,7 +259,7 @@ class DebateService:
                 prompt=(
                     f"Summarize the engineering plan for this debate topic: {debate.get('topic', '')}.\n"
                     "Use the structured round data below. Do not invent new requirements.\n\n"
-                    f"{self._instruction_context()}"
+                    f"{self._instruction_context(project_id=str(debate.get('project_id') or ''))}"
                     f"Structured rounds JSON:\n{json.dumps(structured_rounds, ensure_ascii=True)}\n\n"
                     "Return valid JSON only with this exact shape:\n"
                     '{'

@@ -380,3 +380,86 @@ def test_execution_second_approval_returns_409(monkeypatch, isolated_workspace_e
         json={"approved": True, "note": "retry"},
     )
     assert second.status_code == 409
+
+
+def test_context_imports_crud(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    # create
+    created = client.post("/workspace/context-imports", json={
+        "project_id": "forge",
+        "source_label": "Design notes",
+        "content": "Prefer async everywhere.",
+        "category": "preference",
+    })
+    assert created.status_code == 200
+    item = created.json()["import"]
+    import_id = item["import_id"]
+    assert item["enabled"] is True
+    assert item["category"] == "preference"
+
+    # list
+    listed = client.get("/workspace/context-imports", params={"project_id": "forge"})
+    assert listed.status_code == 200
+    assert listed.json()["count"] == 1
+    assert listed.json()["imports"][0]["import_id"] == import_id
+
+    # disable
+    toggled = client.post(f"/workspace/context-imports/{import_id}/enabled", json={"enabled": False})
+    assert toggled.status_code == 200
+    assert toggled.json()["import"]["enabled"] is False
+
+    # re-enable
+    toggled2 = client.post(f"/workspace/context-imports/{import_id}/enabled", json={"enabled": True})
+    assert toggled2.status_code == 200
+    assert toggled2.json()["import"]["enabled"] is True
+
+    # delete
+    deleted = client.delete(f"/workspace/context-imports/{import_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "ok"
+
+    listed2 = client.get("/workspace/context-imports", params={"project_id": "forge"})
+    assert listed2.json()["count"] == 0
+
+
+def test_context_imports_invalid_category_is_422(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    resp = client.post("/workspace/context-imports", json={
+        "project_id": "forge",
+        "content": "some content",
+        "category": "invalid_cat",
+    })
+    assert resp.status_code == 422
+
+
+def test_context_import_enabled_not_found_is_404(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    resp = client.post("/workspace/context-imports/ctximp_missing/enabled", json={"enabled": False})
+    assert resp.status_code == 404
+
+
+def test_context_preview_includes_import_count(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    client.post("/workspace/context-imports", json={
+        "project_id": "workspace",
+        "source_label": "Arch notes",
+        "content": "Monorepo. No ORM.",
+        "category": "project_background",
+    })
+    preview = client.get("/workspace/context/preview", params={"project_id": "workspace"})
+    assert preview.status_code == 200
+    data = preview.json()
+    assert data["imported_context_count"] == 1
+    assert "Monorepo. No ORM." in data["system_prompt"]

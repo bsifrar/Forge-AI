@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, DebateCreateRequest, EventListResponse, ExecutionApprovalRequest, ExecutionCreateRequest, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
+from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, ContextImportCreateRequest, ContextImportEnabledRequest, DebateCreateRequest, EventListResponse, ExecutionApprovalRequest, ExecutionCreateRequest, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
 from workspace_ai.workspace_api.streaming import encode_sse_stream
 from workspace_ai.workspace_runtime.session_manager import SessionManager
 
@@ -26,6 +26,33 @@ def build_router(manager: SessionManager) -> APIRouter:
     @router.get("/context/preview")
     def context_preview(project_id: str = "workspace") -> dict:
         return manager.context_preview(project_id=project_id)
+
+    @router.post("/context-imports")
+    def create_context_import(request: ContextImportCreateRequest) -> dict:
+        try:
+            return manager.create_context_import(
+                project_id=request.project_id,
+                source_label=request.source_label,
+                content=request.content,
+                category=request.category,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.get("/context-imports")
+    def list_context_imports(project_id: str | None = None, limit: int = Query(default=200, ge=1, le=500)) -> dict:
+        return manager.list_context_imports(project_id=project_id, limit=limit)
+
+    @router.post("/context-imports/{import_id}/enabled")
+    def set_context_import_enabled(import_id: str, request: ContextImportEnabledRequest) -> dict:
+        result = manager.set_context_import_enabled(import_id=import_id, enabled=request.enabled)
+        if result.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=f"Import not found: {import_id}")
+        return result
+
+    @router.delete("/context-imports/{import_id}")
+    def delete_context_import(import_id: str) -> dict:
+        return manager.delete_context_import(import_id=import_id)
 
     @router.post("/settings")
     def update_settings(request: SettingsUpdateRequest) -> dict:

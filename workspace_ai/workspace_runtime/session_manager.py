@@ -8,6 +8,7 @@ from workspace_ai.workspace_import.chatgpt_importer import ChatGPTExportImporter
 from workspace_ai.workspace_memory.context_service import ContextService
 from workspace_ai.workspace_memory.session_store import SessionStore
 from workspace_ai.workspace_runtime.chat_service import ChatService
+from workspace_ai.workspace_runtime.context_import_service import ContextImportService
 from workspace_ai.workspace_runtime.debate_service import DebateService
 from workspace_ai.workspace_runtime.executor_service import ExecutorService
 from workspace_ai.workspace_runtime.policy_service import PolicyService
@@ -24,6 +25,7 @@ class SessionManager:
         self.stream_manager = StreamManager()
         self.settings_service = SettingsService(store=self.store)
         self.debate_service = DebateService(store=self.store, settings_service=self.settings_service)
+        self.context_import_service = ContextImportService(store=self.store)
         self.executor_service = ExecutorService(store=self.store)
         self.policy_service = PolicyService(store=self.store, settings_service=self.settings_service)
         self.importer = ChatGPTExportImporter(store=self.store, adapter=self.adapter)
@@ -42,10 +44,14 @@ class SessionManager:
     def _chat_role(self) -> Dict[str, str]:
         return self.settings_service.model_role("chat")
 
-    def _inject_preferences(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _inject_preferences(self, context: Dict[str, Any], *, project_id: str = "") -> Dict[str, Any]:
         s = self.settings_service.get()
         context["personal_preferences"] = str(s.get("personal_preferences") or "").strip()
         context["project_instructions"] = str(s.get("project_instructions") or "").strip()
+        if project_id:
+            context["imported_context"] = self.context_import_service.build_context_block(project_id=project_id)
+        else:
+            context["imported_context"] = ""
         return context
 
     def context_preview(self, *, project_id: str) -> Dict[str, Any]:
@@ -54,8 +60,9 @@ class SessionManager:
         stub_context = self._inject_preferences({
             "memory_context": {"summary": "[retrieved memory would appear here]"},
             "checkpoints": [],
-        })
+        }, project_id=project_id)
         system_prompt = self.chat_service._system_prompt(project_id=project_id, context=stub_context)
+        enabled_imports = self.store.list_enabled_context_imports(project_id=project_id)
         return {
             "status": "ok",
             "project_id": project_id,
@@ -63,6 +70,7 @@ class SessionManager:
             "debate_style": s.get("debate_style", "standard"),
             "personal_preferences": stub_context["personal_preferences"],
             "project_instructions": stub_context["project_instructions"],
+            "imported_context_count": len(enabled_imports),
             "system_prompt": system_prompt,
         }
 
@@ -157,6 +165,24 @@ class SessionManager:
     def list_imports(self, *, project_id: str | None = None, limit: int = 50) -> Dict[str, Any]:
         rows = self.store.list_imported_sessions(project_id=project_id, limit=limit)
         return {"status": "ok", "count": len(rows), "sessions": rows}
+
+    # ── context imports ───────────────────────────────────────────────────────
+
+    def create_context_import(self, *, project_id: str, source_label: str, content: str, category: str) -> Dict[str, Any]:
+        try:
+            item = self.context_import_service.create(project_id=project_id, source_label=source_label, content=content, category=category)
+            return {"status": "ok", "import": item}
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def list_context_imports(self, *, project_id: str | None = None, limit: int = 200) -> Dict[str, Any]:
+        return self.context_import_service.list_imports(project_id=project_id, limit=limit)
+
+    def set_context_import_enabled(self, *, import_id: str, enabled: bool) -> Dict[str, Any]:
+        return self.context_import_service.set_enabled(import_id=import_id, enabled=enabled)
+
+    def delete_context_import(self, *, import_id: str) -> Dict[str, Any]:
+        return self.context_import_service.delete(import_id=import_id)
 
     def search_sessions(self, *, query: str, project_id: str | None = None, limit: int = 25) -> Dict[str, Any]:
         rows = self.store.search_sessions(query=query, project_id=project_id, limit=limit)
@@ -256,7 +282,7 @@ class SessionManager:
         user_message = self.store.add_message(session_id=session_id, role=role, content=content, provider="workspace")
         self.adapter.ingest_message(project_id=session["project_id"], conversation_id=session.get("external_conversation_id") or session_id, role=role, content=content, title=session["title"], metadata={"workspace_session_id": session_id})
         policy = self.policy_service.allow_live_call()
-        context = self._inject_preferences(self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget))
+        context = self._inject_preferences(self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget), project_id=session["project_id"])
         history = self.store.list_messages(session_id=session_id, limit=40)
         chat_role = self._chat_role()
         selected_model = model or chat_role["model"]
@@ -287,7 +313,7 @@ class SessionManager:
         yield {"type": "workspace.message.received", "message": user_message}
         self.adapter.ingest_message(project_id=session["project_id"], conversation_id=session.get("external_conversation_id") or session_id, role=role, content=content, title=session["title"], metadata={"workspace_session_id": session_id})
         policy = self.policy_service.allow_live_call()
-        context = self._inject_preferences(self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget))
+        context = self._inject_preferences(self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget), project_id=session["project_id"])
         history = self.store.list_messages(session_id=session_id, limit=40)
         chat_role = self._chat_role()
         selected_model = model or chat_role["model"]
