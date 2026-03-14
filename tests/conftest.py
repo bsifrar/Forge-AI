@@ -20,9 +20,12 @@ def isolated_workspace_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> P
         "WORKSPACE_API_KEY",
         "WORKSPACE_OPENAI_API_KEY",
         "WORKSPACE_XAI_API_KEY",
+        "WORKSPACE_ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "OPENAI_MODEL",
         "XAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_MODEL",
     ]:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(storage_path))
@@ -34,6 +37,9 @@ def isolated_workspace_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> P
     monkeypatch.setenv("WORKSPACE_API_KEY", "")
     monkeypatch.setenv("WORKSPACE_OPENAI_API_KEY", "")
     monkeypatch.setenv("WORKSPACE_XAI_API_KEY", "")
+    monkeypatch.setenv("WORKSPACE_ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("OPENAI_API_KEY", "")
     monkeypatch.setenv("XAI_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
     return storage_path

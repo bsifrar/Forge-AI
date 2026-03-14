@@ -14,7 +14,7 @@ class SettingsService:
     def defaults(self) -> Dict[str, Any]:
         settings = get_settings()
         return {
-            "api_enabled": bool(settings.openai_api_key or settings.xai_api_key),
+            "api_enabled": bool(settings.openai_api_key or settings.xai_api_key or settings.anthropic_api_key),
             "selected_provider": settings.default_provider,
             "selected_model": settings.default_model,
             "daily_spend_cap_usd": 5.0,
@@ -31,6 +31,11 @@ class SettingsService:
             if isinstance(stored, str) and stored.strip():
                 return stored.strip()
             return get_settings().xai_api_key
+        if normalized == "anthropic":
+            stored = settings_map.get("anthropic_api_key", "")
+            if isinstance(stored, str) and stored.strip():
+                return stored.strip()
+            return get_settings().anthropic_api_key
         stored = settings_map.get("api_key", "")
         if isinstance(stored, str) and stored.strip():
             return stored.strip()
@@ -47,7 +52,7 @@ class SettingsService:
         payload["env_workspace_present"] = (project_root / ".env.workspace").exists()
         payload["env_secret_present"] = (project_root / ".env.workspace.secret").exists()
         payload["api_key_configured"] = bool(self.api_key(str(payload.get("selected_provider") or "openai")))
-        payload["available_providers"] = ["openai", "xai"]
+        payload["available_providers"] = ["openai", "xai", "anthropic"]
         payload["usage"] = self.store.api_usage_summary()
         payload["remaining_daily_budget_usd"] = max(0.0, round(float(payload["daily_spend_cap_usd"]) - float(payload["usage"]["spent_today_usd"]), 6))
         payload["remaining_hourly_calls"] = max(0, int(payload["hourly_call_cap"]) - int(payload["usage"]["calls_this_hour"]))

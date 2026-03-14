@@ -14,6 +14,8 @@ class WorkspaceSettings:
     adapter_mode: str
     openai_api_key: str
     xai_api_key: str
+    anthropic_api_key: str
+    anthropic_default_model: str
     default_provider: str
     default_model: str
 
@@ -51,6 +53,8 @@ def get_settings() -> WorkspaceSettings:
         adapter_mode=os.getenv('WORKSPACE_ADAPTER_MODE', 'null').strip().lower(),
         openai_api_key=os.getenv('WORKSPACE_API_KEY', os.getenv('WORKSPACE_OPENAI_API_KEY', os.getenv('OPENAI_API_KEY', ''))),
         xai_api_key=os.getenv('WORKSPACE_XAI_API_KEY', os.getenv('XAI_API_KEY', '')),
+        anthropic_api_key=os.getenv('WORKSPACE_ANTHROPIC_API_KEY', os.getenv('ANTHROPIC_API_KEY', '')),
+        anthropic_default_model=os.getenv('ANTHROPIC_MODEL', 'claude-sonnet-4-20250514'),
         default_provider=os.getenv('WORKSPACE_PROVIDER', 'openai').strip().lower(),
         default_model=os.getenv('WORKSPACE_MODEL', os.getenv('OPENAI_MODEL', 'gpt-5.4')),
     )

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List
 
 from workspace_ai.providers import get_provider
+from workspace_ai.workspace_runtime.artifact_service import ArtifactService
 from workspace_ai.workspace_memory.session_store import SessionStore
 from workspace_ai.workspace_runtime.chat_service import ChatService
 from workspace_ai.workspace_runtime.settings_service import SettingsService
@@ -13,12 +15,13 @@ class DebateService:
         self.store = store
         self.settings_service = settings_service
         self.max_rounds = max(1, int(max_rounds))
+        self.artifact_service = ArtifactService()
 
     @staticmethod
     def _normalize_provider(value: str | None, *, field_name: str) -> str:
         normalized = str(value or "").strip().lower()
-        if normalized not in {"openai", "xai"}:
-            raise ValueError(f"{field_name} must be one of: openai, xai")
+        if normalized not in {"openai", "xai", "anthropic"}:
+            raise ValueError(f"{field_name} must be one of: openai, xai, anthropic")
         return normalized
 
     def _normalize_participants(self, participants: List[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
@@ -51,11 +54,12 @@ class DebateService:
         active_participants = self._normalize_participants(participants)
         bounded_rounds = max(1, min(20, int(max_rounds)))
         normalized_judge = self._normalize_provider(judge_provider or "openai", field_name="judge_provider")
+        normalized_files = self.artifact_service.normalize_inputs(files)
         debate = self.store.create_debate(
             project_id=project_id,
             topic=topic,
             bottlenecks=bottlenecks,
-            files=[str(item).strip() for item in (files or []) if str(item).strip()],
+            files=normalized_files,
             participants=active_participants,
             max_rounds=bounded_rounds,
             judge_provider=normalized_judge,
@@ -87,6 +91,7 @@ class DebateService:
                         api_key=api_key,
                         provider_name=provider_name,
                     )
+                    response = self._normalize_round_response(response=response, provider_name=provider_name)
                 except Exception as exc:
                     response = {
                         "content": f"[provider_error:{provider_name}] {exc}",
@@ -95,6 +100,11 @@ class DebateService:
                         "mode": "error",
                         "usage": {},
                         "error": str(exc),
+                        "structured": self._fallback_round_structure(
+                            content=f"[provider_error:{provider_name}] {exc}",
+                            provider_name=provider_name,
+                            agreed=False,
+                        ),
                     }
                     provider_errors.append(f"{provider_name}: {exc}")
                 self.store.add_debate_round(
@@ -108,7 +118,8 @@ class DebateService:
                 history.append({"role": "assistant", "content": content})
                 if str(response.get("mode") or "") != "error":
                     successful_responses += 1
-                if "AGREED" in content.upper() and str(response.get("mode") or "") != "error":
+                structured = response.get("structured") if isinstance(response.get("structured"), dict) else {}
+                if bool(structured.get("agreed")) and str(response.get("mode") or "") != "error":
                     final = self._judge_summary(debate=debate, history=history)
                     finalized = self.store.finalize_debate(debate_id=debate_id, final_plan=final, status="completed")
                     return {"status": "ok", "debate": finalized}
@@ -120,6 +131,13 @@ class DebateService:
                 "content": "Debate failed because all participant responses errored.",
                 "usage": {},
                 "errors": provider_errors,
+                "structured": {
+                    "plan": "Debate failed because all participant responses errored.",
+                    "rationale": "Every provider call failed before a usable proposal was produced.",
+                    "risks": provider_errors,
+                    "confidence": 0.0,
+                    "agreed": False,
+                },
             }
             finalized = self.store.finalize_debate(debate_id=debate_id, final_plan=final, status="failed")
             return {"status": "ok", "debate": finalized}
@@ -140,25 +158,39 @@ class DebateService:
         return {"status": "ok", "count": len(debates), "debates": debates}
 
     def _debate_context_summary(self, debate: Dict[str, Any]) -> str:
-        files = ", ".join(str(item) for item in debate.get("files", [])) or "[none]"
+        file_labels = ", ".join(
+            str(item.get("label") or item.get("path") or "").strip()
+            for item in debate.get("files", [])
+            if isinstance(item, dict) and str(item.get("label") or item.get("path") or "").strip()
+        ) or "[none]"
         bottlenecks = str(debate.get("bottlenecks") or "").strip() or "[none]"
-        return f"Debate topic: {debate.get('topic', '')}\nBottlenecks: {bottlenecks}\nFiles: {files}"
+        return f"Debate topic: {debate.get('topic', '')}\nBottlenecks: {bottlenecks}\nFiles: {file_labels}"
 
     def _participant_prompt(self, *, debate: Dict[str, Any], history: List[Dict[str, str]], round_index: int) -> str:
         prior = "\n".join(f"- {item['content']}" for item in history[-4:] if str(item.get("content") or "").strip())
-        files = "\n".join(f"- {item}" for item in debate.get("files", []) if str(item).strip())
+        files = self.artifact_service.prompt_context(debate.get("files") if isinstance(debate.get("files"), list) else [])
         return (
             f"Round {round_index} debate.\n"
             f"Topic: {debate.get('topic', '')}\n"
             f"Bottlenecks:\n- {str(debate.get('bottlenecks') or '').strip() or '[none]'}\n"
-            f"Files:\n{files or '- [none]'}\n"
+            f"Artifacts:\n{files}\n"
             f"Recent positions:\n{prior or '[none]'}\n\n"
-            "Provide a concise engineering recommendation. If you believe the group has converged, end with AGREED."
+            "Return valid JSON only with this exact shape:\n"
+            '{'
+            '"proposal": "concise engineering recommendation", '
+            '"rationale": "why this is the best next step", '
+            '"risks": ["risk 1", "risk 2"], '
+            '"confidence": 0.0, '
+            '"agreed": false'
+            "}\n"
+            "Set agreed to true only if the group has clearly converged. Confidence must be between 0 and 1."
         )
 
     def _judge_summary(self, *, debate: Dict[str, Any], history: List[Dict[str, str]]) -> Dict[str, Any]:
         judge_provider = str(debate.get("judge_provider") or "openai").strip().lower()
         selected_model = str(self.settings_service.get().get("selected_model") or "").strip() or None
+        latest_debate = self.store.get_debate(str(debate.get("debate_id") or "")) or debate
+        structured_rounds = self._structured_history_payload(debate=latest_debate)
         try:
             api_key = self.settings_service.api_key(judge_provider)
             provider = get_provider(judge_provider, api_key=api_key, model=selected_model)
@@ -166,8 +198,17 @@ class DebateService:
             response = chat.respond(
                 project_id=str(debate.get("project_id") or "forge"),
                 prompt=(
-                    f"Summarize the agreed engineering plan for this debate topic: {debate.get('topic', '')}. "
-                    "Extract the final plan from the debate history. Return a concise plan with rationale and avoid inventing new requirements."
+                    f"Summarize the engineering plan for this debate topic: {debate.get('topic', '')}.\n"
+                    "Use the structured round data below. Do not invent new requirements.\n\n"
+                    f"Structured rounds JSON:\n{json.dumps(structured_rounds, ensure_ascii=True)}\n\n"
+                    "Return valid JSON only with this exact shape:\n"
+                    '{'
+                    '"plan": "final plan", '
+                    '"rationale": "why this plan wins", '
+                    '"risks": ["risk 1", "risk 2"], '
+                    '"confidence": 0.0, '
+                    '"agreed": false'
+                    "}"
                 ),
                 context={"memory_context": {"summary": self._debate_context_summary(debate)}, "checkpoints": []},
                 history=history,
@@ -186,11 +227,160 @@ class DebateService:
                 ),
                 "usage": {},
                 "error": str(exc),
+                "structured": {
+                    "plan": history[-1]["content"] if history else "Judge summary unavailable.",
+                    "rationale": "Fell back to the latest debate response because the judge provider failed.",
+                    "risks": [str(exc)],
+                    "confidence": 0.2,
+                    "agreed": False,
+                },
             }
+        normalized = self._normalize_final_plan_response(response=response, provider_name=judge_provider)
         return {
             "provider": response.get("provider", judge_provider),
             "model": response.get("model", selected_model),
-            "content": response.get("content", ""),
+            "content": normalized.get("content", ""),
             "mode": response.get("mode", "live"),
             "usage": response.get("usage", {}),
+            "structured": normalized.get("structured", {}),
         }
+
+    def _normalize_round_response(self, *, response: Dict[str, Any], provider_name: str) -> Dict[str, Any]:
+        content = str(response.get("content") or "").strip()
+        structured = self._parse_json_object(content)
+        if structured is None:
+            structured_payload = self._fallback_round_structure(
+                content=content,
+                provider_name=provider_name,
+                agreed="AGREED" in content.upper(),
+            )
+        else:
+            structured_payload = {
+                "proposal": str(structured.get("proposal") or content or "No proposal provided.").strip(),
+                "rationale": str(structured.get("rationale") or "No rationale provided.").strip(),
+                "risks": self._normalize_risks(structured.get("risks")),
+                "confidence": self._normalize_confidence(structured.get("confidence")),
+                "agreed": bool(structured.get("agreed")),
+            }
+        response["structured"] = structured_payload
+        response["content"] = self._render_round_content(structured_payload)
+        return response
+
+    def _normalize_final_plan_response(self, *, response: Dict[str, Any], provider_name: str) -> Dict[str, Any]:
+        content = str(response.get("content") or "").strip()
+        structured = self._parse_json_object(content)
+        if structured is None:
+            payload = {
+                "plan": content or "No final plan available.",
+                "rationale": "Derived from the judge response without structured fields.",
+                "risks": [],
+                "confidence": 0.5,
+                "agreed": "AGREED" in content.upper(),
+            }
+        else:
+            payload = {
+                "plan": str(structured.get("plan") or structured.get("proposal") or content or "No final plan available.").strip(),
+                "rationale": str(structured.get("rationale") or "No rationale provided.").strip(),
+                "risks": self._normalize_risks(structured.get("risks")),
+                "confidence": self._normalize_confidence(structured.get("confidence")),
+                "agreed": bool(structured.get("agreed")),
+            }
+        return {
+            "provider": response.get("provider", provider_name),
+            "content": self._render_final_plan_content(payload),
+            "structured": payload,
+        }
+
+    def _structured_history_payload(self, *, debate: Dict[str, Any]) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for round_item in debate.get("rounds", []):
+            if not isinstance(round_item, dict):
+                continue
+            response = round_item.get("response") if isinstance(round_item.get("response"), dict) else {}
+            structured = response.get("structured") if isinstance(response.get("structured"), dict) else {}
+            rows.append(
+                {
+                    "round_index": int(round_item.get("round_index") or 0),
+                    "provider": str(round_item.get("participant_provider") or ""),
+                    "model": str(round_item.get("participant_model") or ""),
+                    "proposal": str(structured.get("proposal") or response.get("content") or "").strip(),
+                    "rationale": str(structured.get("rationale") or "").strip(),
+                    "risks": self._normalize_risks(structured.get("risks")),
+                    "confidence": self._normalize_confidence(structured.get("confidence")),
+                    "agreed": bool(structured.get("agreed")),
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _parse_json_object(content: str) -> Dict[str, Any] | None:
+        text = content.strip()
+        if not text:
+            return None
+        candidates = [text]
+        if "```" in text:
+            parts = text.split("```")
+            for part in parts:
+                cleaned = part.strip()
+                if not cleaned:
+                    continue
+                if cleaned.lower().startswith("json"):
+                    cleaned = cleaned[4:].strip()
+                candidates.append(cleaned)
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    @staticmethod
+    def _normalize_risks(value: Any) -> List[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
+
+    @staticmethod
+    def _normalize_confidence(value: Any) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            numeric = 0.5
+        return max(0.0, min(1.0, numeric))
+
+    def _fallback_round_structure(self, *, content: str, provider_name: str, agreed: bool) -> Dict[str, Any]:
+        return {
+            "proposal": content or f"{provider_name} returned no proposal.",
+            "rationale": "Derived from an unstructured provider response.",
+            "risks": [],
+            "confidence": 0.5,
+            "agreed": bool(agreed),
+        }
+
+    @staticmethod
+    def _render_round_content(structured: Dict[str, Any]) -> str:
+        risks = structured.get("risks") if isinstance(structured.get("risks"), list) else []
+        risk_text = ", ".join(str(item) for item in risks if str(item).strip()) or "none"
+        return (
+            f"Proposal: {str(structured.get('proposal') or '').strip()}\n"
+            f"Rationale: {str(structured.get('rationale') or '').strip()}\n"
+            f"Risks: {risk_text}\n"
+            f"Confidence: {DebateService._normalize_confidence(structured.get('confidence')):.2f}\n"
+            f"Agreed: {'yes' if structured.get('agreed') else 'no'}"
+        ).strip()
+
+    @staticmethod
+    def _render_final_plan_content(structured: Dict[str, Any]) -> str:
+        risks = structured.get("risks") if isinstance(structured.get("risks"), list) else []
+        risk_lines = "\n".join(f"- {str(item).strip()}" for item in risks if str(item).strip()) or "- none"
+        return (
+            f"Plan:\n{str(structured.get('plan') or '').strip()}\n\n"
+            f"Rationale:\n{str(structured.get('rationale') or '').strip()}\n\n"
+            f"Risks:\n{risk_lines}\n\n"
+            f"Confidence: {DebateService._normalize_confidence(structured.get('confidence')):.2f}\n"
+            f"Agreed: {'yes' if structured.get('agreed') else 'no'}"
+        ).strip()
