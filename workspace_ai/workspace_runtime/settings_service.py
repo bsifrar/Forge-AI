@@ -52,6 +52,11 @@ class SettingsService:
         payload["env_workspace_present"] = (project_root / ".env.workspace").exists()
         payload["env_secret_present"] = (project_root / ".env.workspace.secret").exists()
         payload["api_key_configured"] = bool(self.api_key(str(payload.get("selected_provider") or "openai")))
+        payload["provider_keys_configured"] = {
+            "openai": bool(self.api_key("openai")),
+            "xai": bool(self.api_key("xai")),
+            "anthropic": bool(self.api_key("anthropic")),
+        }
         payload["available_providers"] = ["openai", "xai", "anthropic"]
         payload["usage"] = self.store.api_usage_summary()
         payload["remaining_daily_budget_usd"] = max(0.0, round(float(payload["daily_spend_cap_usd"]) - float(payload["usage"]["spent_today_usd"]), 6))
@@ -60,8 +65,12 @@ class SettingsService:
         return payload
 
     def update(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        _PROVIDER_KEY_FIELDS = {"api_key", "xai_api_key", "anthropic_api_key"}
         for key, value in updates.items():
-            if value is not None:
+            if key in _PROVIDER_KEY_FIELDS:
+                if isinstance(value, str) and value.strip():
+                    self.store.set_setting(key=key, value=value.strip())
+            elif value is not None:
                 self.store.set_setting(key=key, value=value)
         return self.get()
 
@@ -81,6 +90,8 @@ class SettingsService:
         output_price = float(updates.get('price_output_per_1m_usd') or 0.0)
         api_enabled = bool(updates.get('api_enabled'))
         api_key = (updates.get('api_key') or '').strip()
+        xai_api_key = (updates.get('xai_api_key') or '').strip()
+        anthropic_api_key = (updates.get('anthropic_api_key') or '').strip()
 
         env_lines = [
             '# Workspace runtime defaults. Keep secrets in .env.workspace.secret.',
@@ -98,9 +109,18 @@ class SettingsService:
             env_lines.insert(2, f'WORKSPACE_EXTERNAL_BASE_URL={external_base_url}')
         env_path.write_text('\n'.join(env_lines) + '\n')
 
+        secret_lines = ['# Local-only secrets for workspace runtime.']
         if api_key:
-            secret_path.write_text('# Local-only secrets for workspace runtime.\n' f'WORKSPACE_API_KEY="{api_key}"\n')
+            secret_lines.append(f'WORKSPACE_API_KEY="{api_key}"')
             self.store.set_setting(key='api_key', value=api_key)
+        if xai_api_key:
+            secret_lines.append(f'WORKSPACE_XAI_API_KEY="{xai_api_key}"')
+            self.store.set_setting(key='xai_api_key', value=xai_api_key)
+        if anthropic_api_key:
+            secret_lines.append(f'WORKSPACE_ANTHROPIC_API_KEY="{anthropic_api_key}"')
+            self.store.set_setting(key='anthropic_api_key', value=anthropic_api_key)
+        if len(secret_lines) > 1:
+            secret_path.write_text('\n'.join(secret_lines) + '\n')
         elif secret_path.exists():
             secret_path.unlink()
             self.store.set_setting(key='api_key', value='')

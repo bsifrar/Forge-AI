@@ -46,6 +46,8 @@ def test_settings_include_provider_selection(monkeypatch, isolated_workspace_env
     payload = settings.json()["settings"]
     assert payload["selected_provider"] == "xai"
     assert "xai" in payload["available_providers"]
+    assert "anthropic" in payload["available_providers"]
+    assert "provider_keys_configured" in payload
 
 
 def test_debate_start_and_fetch(monkeypatch, isolated_workspace_env):
@@ -214,7 +216,7 @@ def test_debate_runtime_validation_error_is_422(monkeypatch, isolated_workspace_
     monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
 
     def fail_start_debate(self, **kwargs):
-        raise ValueError("participants.provider must be one of: openai, xai")
+        raise ValueError("participants.provider must be one of: openai, xai, anthropic")
 
     monkeypatch.setattr(DebateService, "start_debate", fail_start_debate)
     app = build_app()

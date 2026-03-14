@@ -462,8 +462,28 @@
               <option value="true">API enabled</option>
               <option value="false">API disabled</option>
             </select>
-            <input id="model" placeholder="Model" value="gpt-5.4" />
-            <input id="apiKey" type="password" placeholder="Workspace API key (stored locally)" style="grid-column: 1 / span 2;" />
+            <select id="selectedProvider" onchange="renderProviderKeySection()">
+              <option value="openai">OpenAI</option>
+              <option value="xai">xAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+            <input id="model" placeholder="Model" value="gpt-5.4" style="grid-column: 1 / span 2;" />
+          </div>
+          <div id="providerKeySection" style="margin-top:10px;">
+            <div id="providerKeyOpenai">
+              <div class="field-label">OpenAI API key <span id="openaiKeyStatus" class="pill"></span></div>
+              <input id="apiKey" type="password" placeholder="Leave blank to keep existing key" style="width:100%;" />
+            </div>
+            <div id="providerKeyXai" style="display:none;">
+              <div class="field-label">xAI API key <span id="xaiKeyStatus" class="pill"></span></div>
+              <input id="xaiApiKey" type="password" placeholder="Leave blank to keep existing key" style="width:100%;" />
+            </div>
+            <div id="providerKeyAnthropic" style="display:none;">
+              <div class="field-label">Anthropic API key <span id="anthropicKeyStatus" class="pill"></span></div>
+              <input id="anthropicApiKey" type="password" placeholder="Leave blank to keep existing key" style="width:100%;" />
+            </div>
+          </div>
+          <div class="settings-grid" style="margin-top:10px;">
             <input id="dailyCap" type="number" step="0.01" placeholder="Daily cap" />
             <input id="hourlyCap" type="number" step="1" placeholder="Hourly cap" />
             <input id="inputPrice" type="number" step="0.01" placeholder="Input $ / 1M" />
@@ -473,7 +493,7 @@
             <button onclick="saveSettings()">Save Settings</button>
             <button class="secondary" onclick="loadAll()">Refresh</button>
           </div>
-          <p id="settingsStatus" class="help-text" style="margin-top:10px;">Save your API key, model, and budget settings here.</p>
+          <p id="settingsStatus" class="help-text" style="margin-top:10px;">Select a provider, enter its API key, and save.</p>
         </div>
         <div class="panel">
           <h2>First-Run Checklist</h2>
@@ -1613,14 +1633,32 @@
       state.settings = payload.settings;
       const s = payload.settings;
       document.getElementById("apiEnabled").value = String(Boolean(s.api_enabled));
+      const providerEl = document.getElementById("selectedProvider");
+      if (providerEl && s.selected_provider) providerEl.value = s.selected_provider;
       document.getElementById("model").value = s.selected_model || "gpt-5.4";
       document.getElementById("dailyCap").value = s.daily_spend_cap_usd ?? "";
       document.getElementById("hourlyCap").value = s.hourly_call_cap ?? "";
       document.getElementById("inputPrice").value = s.price_input_per_1m_usd ?? "";
       document.getElementById("outputPrice").value = s.price_output_per_1m_usd ?? "";
+      const keys = s.provider_keys_configured || {};
+      const pill = (ok) => ok ? "✓ configured" : "not set";
+      const openaiEl = document.getElementById("openaiKeyStatus");
+      const xaiEl = document.getElementById("xaiKeyStatus");
+      const anthropicEl = document.getElementById("anthropicKeyStatus");
+      if (openaiEl) openaiEl.textContent = pill(keys.openai);
+      if (xaiEl) xaiEl.textContent = pill(keys.xai);
+      if (anthropicEl) anthropicEl.textContent = pill(keys.anthropic);
+      renderProviderKeySection();
       document.getElementById("settingsStatus").textContent = s.api_key_configured
-        ? "Settings loaded. Workspace API key is configured."
-        : "Settings loaded. Add a Workspace API key if you want live model responses.";
+        ? `Settings loaded. ${s.selected_provider || "openai"} key is configured.`
+        : "Settings loaded. Enter an API key for the selected provider.";
+    }
+
+    function renderProviderKeySection() {
+      const provider = (document.getElementById("selectedProvider")?.value || "openai").toLowerCase();
+      document.getElementById("providerKeyOpenai").style.display = provider === "openai" ? "" : "none";
+      document.getElementById("providerKeyXai").style.display = provider === "xai" ? "" : "none";
+      document.getElementById("providerKeyAnthropic").style.display = provider === "anthropic" ? "" : "none";
     }
 
     async function loadStatus() {
@@ -1765,8 +1803,11 @@
 
     async function saveSettings(options = {}) {
       const apiEnabled = document.getElementById("apiEnabled").value === "true";
+      const selectedProvider = document.getElementById("selectedProvider")?.value || "openai";
       const model = document.getElementById("model").value.trim();
       const apiKey = document.getElementById("apiKey").value.trim();
+      const xaiApiKey = document.getElementById("xaiApiKey").value.trim();
+      const anthropicApiKey = document.getElementById("anthropicApiKey").value.trim();
       const dailyCap = Number(document.getElementById("dailyCap").value || 0);
       const hourlyCap = Number(document.getElementById("hourlyCap").value || 0);
       const inputPrice = Number(document.getElementById("inputPrice").value || 0);
@@ -1778,9 +1819,12 @@
         showToast("Settings error: model is required.", "error");
         return false;
       }
-      if (apiEnabled && !apiKey && !state.settings?.api_key_configured) {
-        statusEl.textContent = "Settings error: add a Workspace API key or disable API access.";
-        showToast("Settings error: add a Workspace API key or disable API access.", "error");
+      const keys = state.settings?.provider_keys_configured || {};
+      const activeKeyEntered = selectedProvider === "xai" ? xaiApiKey : selectedProvider === "anthropic" ? anthropicApiKey : apiKey;
+      const activeKeyConfigured = selectedProvider === "xai" ? keys.xai : selectedProvider === "anthropic" ? keys.anthropic : keys.openai;
+      if (apiEnabled && !activeKeyEntered && !activeKeyConfigured) {
+        statusEl.textContent = `Settings error: enter an API key for ${selectedProvider} or disable API access.`;
+        showToast(`Settings error: enter an API key for ${selectedProvider}.`, "error");
         return false;
       }
       try {
@@ -1789,8 +1833,11 @@
           method: "POST",
           body: JSON.stringify({
             api_enabled: apiEnabled,
+            selected_provider: selectedProvider,
             selected_model: model,
             api_key: apiKey || null,
+            xai_api_key: xaiApiKey || null,
+            anthropic_api_key: anthropicApiKey || null,
             daily_spend_cap_usd: dailyCap,
             hourly_call_cap: hourlyCap,
             price_input_per_1m_usd: inputPrice,
@@ -1798,6 +1845,8 @@
           }),
         });
         document.getElementById("apiKey").value = "";
+        document.getElementById("xaiApiKey").value = "";
+        document.getElementById("anthropicApiKey").value = "";
         persistUIState();
         await loadAll();
         statusEl.textContent = options.setup
