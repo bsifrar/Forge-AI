@@ -112,6 +112,18 @@ class SessionStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(debate_id) REFERENCES debates(debate_id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS executions (
+                    execution_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    debate_id TEXT NOT NULL DEFAULT '',
+                    source_plan_json TEXT NOT NULL DEFAULT '{}',
+                    proposal_json TEXT NOT NULL DEFAULT '{}',
+                    execution_json TEXT NOT NULL DEFAULT '{}',
+                    approval_note TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending_approval',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             debate_columns = {
@@ -424,4 +436,94 @@ class SessionStore:
             debate = self.get_debate(str(row["debate_id"]))
             if debate is not None:
                 out.append(debate)
+        return out
+
+    def create_execution(
+        self,
+        *,
+        project_id: str,
+        debate_id: str,
+        source_plan: Dict[str, Any],
+        proposal: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        execution_id = f"exe_{uuid.uuid4().hex[:12]}"
+        now = self._now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO executions(
+                    execution_id, project_id, debate_id, source_plan_json, proposal_json, execution_json,
+                    approval_note, status, created_at, updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, '{}', '', 'pending_approval', ?, ?)
+                """,
+                (
+                    execution_id,
+                    project_id,
+                    debate_id,
+                    self._json(source_plan),
+                    self._json(proposal),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        return self.get_execution(execution_id) or {}
+
+    def update_execution(
+        self,
+        *,
+        execution_id: str,
+        status: str,
+        execution: Dict[str, Any] | None = None,
+        approval_note: str | None = None,
+    ) -> Dict[str, Any] | None:
+        now = self._now_iso()
+        with self._connect() as conn:
+            current = conn.execute("SELECT * FROM executions WHERE execution_id = ?", (execution_id,)).fetchone()
+            if current is None:
+                return None
+            conn.execute(
+                """
+                UPDATE executions
+                SET status = ?, execution_json = ?, approval_note = ?, updated_at = ?
+                WHERE execution_id = ?
+                """,
+                (
+                    status,
+                    self._json(execution if execution is not None else json.loads(str(current["execution_json"]) or "{}")),
+                    approval_note if approval_note is not None else str(current["approval_note"] or ""),
+                    now,
+                    execution_id,
+                ),
+            )
+            conn.commit()
+        return self.get_execution(execution_id)
+
+    def get_execution(self, execution_id: str) -> Dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM executions WHERE execution_id = ?", (execution_id,)).fetchone()
+        if not row:
+            return None
+        parsed = dict(row)
+        parsed["source_plan"] = json.loads(parsed.pop("source_plan_json", "{}"))
+        parsed["proposal"] = json.loads(parsed.pop("proposal_json", "{}"))
+        parsed["execution"] = json.loads(parsed.pop("execution_json", "{}"))
+        return parsed
+
+    def list_executions(self, *, project_id: str | None = None, limit: int = 50) -> List[Dict[str, Any]]:
+        sql = "SELECT execution_id FROM executions"
+        params: list[Any] = []
+        if project_id:
+            sql += " WHERE project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, min(500, int(limit))))
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            execution = self.get_execution(str(row["execution_id"]))
+            if execution is not None:
+                out.append(execution)
         return out

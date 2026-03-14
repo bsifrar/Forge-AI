@@ -26,6 +26,17 @@ class DebateCreateRequest(BaseModel):
     judge_provider: str | None = Field(default=None, pattern="^(openai|xai)$")
 
 
+class ExecutionCreateRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    debate_id: str | None = Field(default=None)
+    plan: str = Field(default="", max_length=12000)
+
+
+class ExecutionApprovalRequest(BaseModel):
+    approved: bool
+    note: str = Field(default="", max_length=4000)
+
+
 class MessageCreateRequest(BaseModel):
     content: str = Field(min_length=1)
     role: str = Field(default="user")

@@ -561,14 +561,14 @@
               <option value="openai" selected>OpenAI</option>
               <option value="xai">xAI</option>
             </select>
-            <button onclick="startDebate()">Start Debate</button>
+            <button id="startDebateBtn" onclick="startDebate()">Start Debate</button>
           </div>
           <p id="debateStatus" class="help-text" style="margin-top:10px;">Start a bounded multi-provider debate from here.</p>
         </div>
         <div class="panel">
           <div class="toolbar">
             <h2>Recent Debates</h2>
-            <button class="secondary" onclick="loadDebates()">Refresh</button>
+            <button id="refreshDebatesBtn" class="secondary" onclick="loadDebates()">Refresh</button>
           </div>
           <div id="debates" class="debate-list"></div>
         </div>
@@ -701,6 +701,10 @@
       wizardMode: "null",
       wizardOpenedOnce: false,
       meta: null,
+      debateSubmitting: false,
+      debatesLoading: false,
+      executionsByDebateId: {},
+      executionPending: {},
     };
 
     function draftStorageKey(sessionId) {
@@ -900,7 +904,19 @@
 
     async function copyText(value, successMessage) {
       try {
-        await navigator.clipboard.writeText(value);
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value);
+        } else {
+          const fallback = document.createElement("textarea");
+          fallback.value = value;
+          fallback.setAttribute("readonly", "");
+          fallback.style.position = "fixed";
+          fallback.style.opacity = "0";
+          document.body.appendChild(fallback);
+          fallback.select();
+          document.execCommand("copy");
+          document.body.removeChild(fallback);
+        }
         showToast(successMessage);
       } catch (error) {
         showToast(`Copy failed: ${error.message}`, "error");
@@ -1107,6 +1123,10 @@
       state.debates = debates;
       const root = document.getElementById("debates");
       document.getElementById("debateCount").textContent = debates.length;
+      if (state.debatesLoading) {
+        root.innerHTML = `<div class="muted">Loading debates...</div>`;
+        return;
+      }
       if (!debates.length) {
         root.innerHTML = `<div class="muted">No debates yet.</div>`;
         return;
@@ -1124,6 +1144,7 @@
             <h4>Final Plan</h4>
             <div class="debate-content">${esc((debate.final_plan || {}).content || "No plan available.")}</div>
           </div>
+          ${renderDebateExecution(debate)}
           <div class="debate-section">
             <h4>Rounds</h4>
             ${(debate.rounds || []).map(round => `
@@ -1141,12 +1162,93 @@
       `).join("");
     }
 
+    function renderDebateExecution(debate) {
+      const execution = state.executionsByDebateId[debate.debate_id] || null;
+      const pending = Boolean(state.executionPending[debate.debate_id]);
+      if (!execution) {
+        return `
+          <div class="debate-section">
+            <h4>Execution</h4>
+            <div class="muted">No execution proposal created for this debate yet.</div>
+            <div class="debate-actions" style="margin-top:10px;">
+              <button ${pending ? "disabled" : ""} onclick="createExecutionFromDebate('${esc(debate.debate_id || "")}')">
+                ${pending ? "Creating..." : "Create Execution"}
+              </button>
+            </div>
+          </div>
+        `;
+      }
+      const proposal = execution.proposal || {};
+      const result = execution.execution || {};
+      const proposalSteps = Array.isArray(proposal.steps) ? proposal.steps : [];
+      const resultSteps = Array.isArray(result.steps) ? result.steps : [];
+      const executionContent = result.result || "";
+      return `
+        <div class="debate-section">
+          <h4>Execution</h4>
+          <div class="help-text">Status: ${esc(execution.status || "unknown")} · Mode: ${esc(proposal.mode || result.mode || "unknown")}</div>
+          ${proposal.summary ? `<div class="debate-content" style="margin-top:8px;">${esc(proposal.summary)}</div>` : ""}
+          ${proposalSteps.length ? `
+            <div class="context-list" style="margin-top:10px;">
+              ${proposalSteps.map(step => `
+                <div class="context-item">
+                  <div class="type">Step ${esc(step.step || "?")} · ${esc(step.status || "pending")}</div>
+                  <div>${esc(step.summary || "")}</div>
+                </div>
+              `).join("")}
+            </div>
+          ` : ""}
+          ${executionContent ? `
+            <div style="margin-top:10px;">
+              <strong style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Execution Result</strong>
+              <div class="debate-content">${esc(executionContent)}</div>
+            </div>
+          ` : ""}
+          ${resultSteps.length ? `
+            <div class="context-list" style="margin-top:10px;">
+              ${resultSteps.map(step => `
+                <div class="context-item">
+                  <div class="type">Step ${esc(step.step || "?")} · ${esc(step.status || "unknown")}</div>
+                  <div>${esc(step.result || step.summary || "")}</div>
+                </div>
+              `).join("")}
+            </div>
+          ` : ""}
+          ${(execution.approval_note || "").trim() ? `<div class="help-text" style="margin-top:8px;"><strong>Approval note</strong>: ${esc(execution.approval_note)}</div>` : ""}
+          <div class="debate-actions" style="margin-top:10px;">
+            ${execution.status === "pending_approval" ? `
+              <button ${pending ? "disabled" : ""} onclick="approveExecution('${esc(execution.execution_id || "")}', '${esc(debate.debate_id || "")}')">
+                ${pending ? "Working..." : "Approve"}
+              </button>
+              <button class="secondary" ${pending ? "disabled" : ""} onclick="rejectExecution('${esc(execution.execution_id || "")}', '${esc(debate.debate_id || "")}')">
+                ${pending ? "Working..." : "Reject"}
+              </button>
+            ` : `
+              <button class="secondary" ${pending ? "disabled" : ""} onclick="createExecutionFromDebate('${esc(debate.debate_id || "")}')">
+                ${pending ? "Creating..." : "Create New Execution"}
+              </button>
+            `}
+            <button class="secondary" onclick='copyExecutionPayload(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(execution || {})))})))'>Copy Execution</button>
+            ${executionContent ? `<button class="secondary" onclick='copyExecutionResult(decodeURIComponent(${JSON.stringify(encodeURIComponent(executionContent))}))'>Copy Result</button>` : ""}
+          </div>
+        </div>
+      `;
+    }
+
     async function copyDebatePlan(content) {
       await copyText(String(content || ""), "Debate plan copied.");
     }
 
     async function copyFullDebate(debate) {
       await copyText(JSON.stringify(debate || {}, null, 2), "Full debate copied.");
+    }
+
+    async function copyExecutionPayload(execution) {
+      await copyText(JSON.stringify(execution || {}, null, 2), "Execution copied.");
+    }
+
+    async function copyExecutionResult(content) {
+      await copyText(String(content || ""), "Execution result copied.");
     }
 
     function renderMessages(messages = []) {
@@ -1379,9 +1481,107 @@
     }
 
     async function loadDebates() {
+      const statusEl = document.getElementById("debateStatus");
+      const refreshBtn = document.getElementById("refreshDebatesBtn");
       const projectId = document.getElementById("debateProjectId").value.trim() || "forge";
-      const payload = await api(`/workspace/debates?project_id=${encodeURIComponent(projectId)}&limit=20`);
-      renderDebates(payload.debates || []);
+      state.debatesLoading = true;
+      if (refreshBtn) refreshBtn.disabled = true;
+      statusEl.textContent = "Loading debates...";
+      renderDebates(state.debates || []);
+      try {
+        const [payload, executionPayload] = await Promise.all([
+          api(`/workspace/debates?project_id=${encodeURIComponent(projectId)}&limit=20`),
+          api(`/workspace/executions?project_id=${encodeURIComponent(projectId)}&limit=100`),
+        ]);
+        const executionMap = {};
+        for (const execution of (executionPayload.executions || [])) {
+          if (!execution || !execution.debate_id) continue;
+          if (!executionMap[execution.debate_id]) {
+            executionMap[execution.debate_id] = execution;
+          }
+        }
+        state.executionsByDebateId = executionMap;
+        renderDebates(payload.debates || []);
+        statusEl.textContent = `Loaded ${payload.count || 0} debate(s).`;
+      } catch (error) {
+        state.executionsByDebateId = {};
+        renderDebates([]);
+        const message = parseError(error);
+        statusEl.textContent = `Debate load error: ${message}`;
+        showToast(`Debates load failed: ${message}`, "error");
+      } finally {
+        state.debatesLoading = false;
+        if (refreshBtn) refreshBtn.disabled = false;
+        renderDebates(state.debates || []);
+      }
+    }
+
+    async function createExecutionFromDebate(debateId) {
+      if (!debateId) return;
+      state.executionPending[debateId] = true;
+      renderDebates(state.debates || []);
+      try {
+        const debate = (state.debates || []).find(item => item.debate_id === debateId) || {};
+        await api("/workspace/executions", {
+          method: "POST",
+          body: JSON.stringify({
+            project_id: debate.project_id || document.getElementById("debateProjectId").value.trim() || "forge",
+            debate_id: debateId,
+            plan: "",
+          }),
+        });
+        document.getElementById("debateStatus").textContent = `Execution proposal created for ${debateId}.`;
+        showToast("Execution proposal created.");
+        await loadDebates();
+      } catch (error) {
+        const message = parseError(error);
+        document.getElementById("debateStatus").textContent = `Execution create error: ${message}`;
+        showToast(`Execution create error: ${message}`, "error");
+      } finally {
+        delete state.executionPending[debateId];
+        renderDebates(state.debates || []);
+      }
+    }
+
+    async function decideExecution(executionId, debateId, approved) {
+      if (!executionId || !debateId) return;
+      state.executionPending[debateId] = true;
+      renderDebates(state.debates || []);
+      const note = window.prompt(
+        approved ? "Optional approval note for this read-only execution:" : "Optional rejection note:",
+        ""
+      );
+      if (note === null) {
+        delete state.executionPending[debateId];
+        renderDebates(state.debates || []);
+        return;
+      }
+      try {
+        await api(`/workspace/executions/${encodeURIComponent(executionId)}/approval`, {
+          method: "POST",
+          body: JSON.stringify({ approved, note }),
+        });
+        document.getElementById("debateStatus").textContent = approved
+          ? `Execution approved: ${executionId}`
+          : `Execution rejected: ${executionId}`;
+        showToast(approved ? "Execution approved." : "Execution rejected.");
+        await loadDebates();
+      } catch (error) {
+        const message = parseError(error);
+        document.getElementById("debateStatus").textContent = `Execution decision error: ${message}`;
+        showToast(`Execution decision error: ${message}`, "error");
+      } finally {
+        delete state.executionPending[debateId];
+        renderDebates(state.debates || []);
+      }
+    }
+
+    async function approveExecution(executionId, debateId) {
+      await decideExecution(executionId, debateId, true);
+    }
+
+    async function rejectExecution(executionId, debateId) {
+      await decideExecution(executionId, debateId, false);
     }
 
     async function loadAll() {
@@ -1588,6 +1788,8 @@
     }
 
     async function startDebate() {
+      const startBtn = document.getElementById("startDebateBtn");
+      if (state.debateSubmitting) return;
       const projectId = document.getElementById("debateProjectId").value.trim() || "forge";
       const topic = document.getElementById("debateTopic").value.trim();
       const bottlenecks = document.getElementById("debateBottlenecks").value.trim();
@@ -1606,7 +1808,14 @@
         statusEl.textContent = "Debate error: topic is required.";
         return;
       }
+      if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 20) {
+        showToast("Max rounds must be an integer between 1 and 20.", "error");
+        statusEl.textContent = "Debate error: max rounds must be between 1 and 20.";
+        return;
+      }
 
+      state.debateSubmitting = true;
+      if (startBtn) startBtn.disabled = true;
       statusEl.textContent = "Starting debate...";
       try {
         const payload = await api("/workspace/debates", {
@@ -1641,6 +1850,9 @@
         const message = parseError(error);
         statusEl.textContent = `Debate error: ${message}`;
         showToast(`Debate error: ${message}`, "error");
+      } finally {
+        state.debateSubmitting = false;
+        if (startBtn) startBtn.disabled = false;
       }
     }
 

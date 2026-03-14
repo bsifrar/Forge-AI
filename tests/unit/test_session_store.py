@@ -54,3 +54,27 @@ def test_session_store_debate_roundtrip(isolated_workspace_env):
     assert finalized is not None
     assert finalized["final_plan"]["content"] == "Final plan"
     assert len(finalized["rounds"]) == 1
+
+
+def test_session_store_execution_roundtrip(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+
+    execution = store.create_execution(
+        project_id="forge",
+        debate_id="deb_123",
+        source_plan={"content": "Inspect current API flow."},
+        proposal={"summary": "Inspect current API flow.", "steps": [{"step": 1, "summary": "Inspect current API flow."}]},
+    )
+    assert execution["status"] == "pending_approval"
+    assert execution["debate_id"] == "deb_123"
+
+    updated = store.update_execution(
+        execution_id=execution["execution_id"],
+        status="completed",
+        execution={"result": "Recorded only", "applied": False},
+        approval_note="approved for review mode",
+    )
+    assert updated is not None
+    assert updated["status"] == "completed"
+    assert updated["execution"]["result"] == "Recorded only"
+    assert updated["approval_note"] == "approved for review mode"

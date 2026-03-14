@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from workspace_ai.app.main import build_app
+from workspace_ai.workspace_runtime.debate_service import DebateService
 
 
 def test_session_create_list_delete_and_meta(monkeypatch, isolated_workspace_env):
@@ -126,3 +127,110 @@ def test_debate_max_rounds_bounds(monkeypatch, isolated_workspace_env):
         },
     )
     assert invalid.status_code == 422
+
+
+def test_get_debate_not_found_returns_404(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    fetched = client.get("/workspace/debates/deb_missing")
+    assert fetched.status_code == 404
+
+
+def test_list_debates_limit_validation(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    listed = client.get("/workspace/debates", params={"project_id": "forge", "limit": 0})
+    assert listed.status_code == 422
+
+
+def test_debate_runtime_validation_error_is_422(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+
+    def fail_start_debate(self, **kwargs):
+        raise ValueError("participants.provider must be one of: openai, xai")
+
+    monkeypatch.setattr(DebateService, "start_debate", fail_start_debate)
+    app = build_app()
+    client = TestClient(app)
+
+    created = client.post(
+        "/workspace/debates",
+        json={
+            "project_id": "forge",
+            "topic": "Runtime validation path",
+            "participants": [{"provider": "openai", "model": "test-model"}],
+        },
+    )
+    assert created.status_code == 422
+    assert "participants.provider" in str(created.json().get("detail"))
+
+
+def test_execution_create_approve_and_fetch(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    created = client.post(
+        "/workspace/executions",
+        json={
+            "project_id": "forge",
+            "plan": "Inspect current runtime.\nAdd executor endpoints.\nRun targeted tests.",
+        },
+    )
+    assert created.status_code == 200
+    payload = created.json()
+    execution_id = payload["execution"]["execution_id"]
+    assert payload["execution"]["status"] == "pending_approval"
+
+    approved = client.post(
+        f"/workspace/executions/{execution_id}/approval",
+        json={"approved": True, "note": "record-only"},
+    )
+    assert approved.status_code == 200
+    approved_payload = approved.json()
+    assert approved_payload["execution"]["status"] == "completed"
+    assert approved_payload["execution"]["execution"]["applied"] is False
+
+    fetched = client.get(f"/workspace/executions/{execution_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["execution"]["execution_id"] == execution_id
+
+
+def test_execution_create_from_missing_debate_is_422(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    created = client.post(
+        "/workspace/executions",
+        json={"project_id": "forge", "debate_id": "deb_missing", "plan": ""},
+    )
+    assert created.status_code == 422
+
+
+def test_execution_second_approval_returns_409(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    created = client.post(
+        "/workspace/executions",
+        json={"project_id": "forge", "plan": "Review proposal."},
+    )
+    execution_id = created.json()["execution"]["execution_id"]
+
+    first = client.post(
+        f"/workspace/executions/{execution_id}/approval",
+        json={"approved": False, "note": "not now"},
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/workspace/executions/{execution_id}/approval",
+        json={"approved": True, "note": "retry"},
+    )
+    assert second.status_code == 409

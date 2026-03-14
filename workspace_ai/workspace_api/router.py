@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, DebateCreateRequest, EventListResponse, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
+from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, DebateCreateRequest, EventListResponse, ExecutionApprovalRequest, ExecutionCreateRequest, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
 from workspace_ai.workspace_api.streaming import encode_sse_stream
 from workspace_ai.workspace_runtime.session_manager import SessionManager
 
@@ -40,24 +40,58 @@ def build_router(manager: SessionManager) -> APIRouter:
         return manager.list_sessions(project_id=project_id, limit=limit)
 
     @router.get("/debates")
-    def list_debates(project_id: str | None = None, limit: int = 50) -> dict:
+    def list_debates(project_id: str | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict:
         return manager.list_debates(project_id=project_id, limit=limit)
 
     @router.post("/debates")
     def start_debate(request: DebateCreateRequest) -> dict:
-        return manager.start_debate(
-            project_id=request.project_id,
-            topic=request.topic,
-            bottlenecks=request.bottlenecks,
-            files=request.files,
-            participants=[participant.model_dump() for participant in request.participants],
-            max_rounds=request.max_rounds,
-            judge_provider=request.judge_provider,
-        )
+        try:
+            return manager.start_debate(
+                project_id=request.project_id,
+                topic=request.topic,
+                bottlenecks=request.bottlenecks,
+                files=request.files,
+                participants=[participant.model_dump() for participant in request.participants],
+                max_rounds=request.max_rounds,
+                judge_provider=request.judge_provider,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.get("/debates/{debate_id}")
     def get_debate(debate_id: str) -> dict:
-        return manager.get_debate(debate_id=debate_id)
+        payload = manager.get_debate(debate_id=debate_id)
+        if payload.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=f"Debate not found: {debate_id}")
+        return payload
+
+    @router.get("/executions")
+    def list_executions(project_id: str | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict:
+        return manager.list_executions(project_id=project_id, limit=limit)
+
+    @router.post("/executions")
+    def create_execution(request: ExecutionCreateRequest) -> dict:
+        try:
+            return manager.create_execution(project_id=request.project_id, debate_id=request.debate_id, plan=request.plan)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.get("/executions/{execution_id}")
+    def get_execution(execution_id: str) -> dict:
+        payload = manager.get_execution(execution_id=execution_id)
+        if payload.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=f"Execution not found: {execution_id}")
+        return payload
+
+    @router.post("/executions/{execution_id}/approval")
+    def approve_execution(execution_id: str, request: ExecutionApprovalRequest) -> dict:
+        try:
+            payload = manager.decide_execution(execution_id=execution_id, approved=request.approved, note=request.note)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if payload.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=f"Execution not found: {execution_id}")
+        return payload
 
     @router.get("/sessions/{session_id}")
     def get_session(session_id: str) -> dict:

@@ -9,6 +9,7 @@ from workspace_ai.workspace_memory.context_service import ContextService
 from workspace_ai.workspace_memory.session_store import SessionStore
 from workspace_ai.workspace_runtime.chat_service import ChatService
 from workspace_ai.workspace_runtime.debate_service import DebateService
+from workspace_ai.workspace_runtime.executor_service import ExecutorService
 from workspace_ai.workspace_runtime.policy_service import PolicyService
 from workspace_ai.workspace_runtime.settings_service import SettingsService
 from workspace_ai.workspace_runtime.stream_manager import StreamManager
@@ -23,6 +24,7 @@ class SessionManager:
         self.stream_manager = StreamManager()
         self.settings_service = SettingsService(store=self.store)
         self.debate_service = DebateService(store=self.store, settings_service=self.settings_service)
+        self.executor_service = ExecutorService(store=self.store)
         self.policy_service = PolicyService(store=self.store, settings_service=self.settings_service)
         self.importer = ChatGPTExportImporter(store=self.store, adapter=self.adapter)
 
@@ -49,6 +51,34 @@ class SessionManager:
 
     def get_debate(self, *, debate_id: str) -> Dict[str, Any]:
         return self.debate_service.get_debate(debate_id=debate_id)
+
+    def list_executions(self, *, project_id: str | None = None, limit: int = 50) -> Dict[str, Any]:
+        return self.executor_service.list_executions(project_id=project_id, limit=limit)
+
+    def get_execution(self, *, execution_id: str) -> Dict[str, Any]:
+        return self.executor_service.get_execution(execution_id=execution_id)
+
+    def create_execution(self, *, project_id: str, debate_id: str | None = None, plan: str = "") -> Dict[str, Any]:
+        result = self.executor_service.create_execution(project_id=project_id, debate_id=debate_id, plan=plan)
+        execution = result.get("execution")
+        if isinstance(execution, dict):
+            self.stream_manager.publish(
+                event_type="workspace.execution.created",
+                session_id=None,
+                payload={"execution": execution},
+            )
+        return result
+
+    def decide_execution(self, *, execution_id: str, approved: bool, note: str = "") -> Dict[str, Any]:
+        result = self.executor_service.decide_execution(execution_id=execution_id, approved=approved, note=note)
+        execution = result.get("execution")
+        if isinstance(execution, dict):
+            self.stream_manager.publish(
+                event_type="workspace.execution.updated",
+                session_id=None,
+                payload={"execution": execution},
+            )
+        return result
 
     def start_debate(
         self,
@@ -81,6 +111,9 @@ class SessionManager:
 
     def update_settings(self, updates: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "ok", "settings": self.settings_service.update(updates)}
+
+    def bootstrap_local_setup(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "ok", "settings": self.settings_service.bootstrap_local_setup(updates)}
 
     def create_session(self, *, project_id: str, title: str, mode: str) -> Dict[str, Any]:
         session = self.store.create_session(project_id=project_id, title=title, mode=mode)
