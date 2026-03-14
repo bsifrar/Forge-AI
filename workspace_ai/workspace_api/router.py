@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, ContextImportCreateRequest, ContextImportEnabledRequest, ContextPackPresetCreateRequest, ContextPackPresetUpdateRequest, DebateCreateRequest, EventListResponse, ExecutionApprovalRequest, ExecutionCreateRequest, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
+from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, ContextImportCreateRequest, ContextImportEnabledRequest, ContextPackPresetCreateRequest, ContextPackPresetUpdateRequest, DebateCreateRequest, EventListResponse, ExecutionApprovalRequest, ExecutionCreateRequest, ExecutionFromHandoffRequest, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
 from workspace_ai.workspace_api.streaming import encode_sse_stream
 from workspace_ai.workspace_runtime.session_manager import SessionManager
 
@@ -142,6 +142,17 @@ def build_router(manager: SessionManager) -> APIRouter:
         if payload.get("status") == "not_found":
             raise HTTPException(status_code=404, detail=f"Debate not found: {debate_id}")
         return payload
+
+    @router.post("/debates/{debate_id}/execute-from-handoff")
+    def execute_from_handoff(debate_id: str, request: ExecutionFromHandoffRequest) -> dict:
+        try:
+            return manager.create_execution_from_handoff(
+                debate_id=debate_id,
+                execution_mode=request.execution_mode,
+                context_import_ids=request.context_import_ids or None,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.get("/debates/{debate_id}/mediation")
     def get_mediation(debate_id: str) -> dict:

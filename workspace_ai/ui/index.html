@@ -1126,6 +1126,8 @@
           <p id="handoffPreviewMeta" class="muted" style="font-size:11px;margin-top:3px;"></p>
         </div>
         <div class="toolbar-actions">
+          <button id="handoffExecReviewBtn" style="display:none;" onclick="executeFromHandoffPreview('read_only_v1')">Execute: Review</button>
+          <button id="handoffExecChangeBtn" class="secondary" style="display:none;" onclick="executeFromHandoffPreview('change_plan_v1')">Execute: Change Plan</button>
           <button onclick="copyHandoffFromPreview()">Copy to Clipboard</button>
           <button class="secondary" onclick="closeHandoffPreview()">Close</button>
         </div>
@@ -1155,6 +1157,7 @@
       executionsByDebateId: {},
       executionPending: {},
       handoffPreviewText: null,
+      handoffPreviewDebateId: null,
       executionContextOverride: {},  // debateId → List[string] (null key means use inherited)
       contextOverrideOpen: null,     // debateId | null
       contextPackPresets: [],        // List of {preset_id, project_id, name, import_ids}
@@ -2074,9 +2077,15 @@
       const contentEl = document.getElementById("handoffPreviewContent");
       const metaEl = document.getElementById("handoffPreviewMeta");
       state.handoffPreviewText = null;
+      state.handoffPreviewDebateId = debateId || null;
       overlay.classList.add("visible");
       contentEl.textContent = "Loading…";
       metaEl.textContent = "";
+
+      // Show execute buttons only for debate handoffs (debate must have a final plan)
+      const showExec = Boolean(debateId && !executionId);
+      document.getElementById("handoffExecReviewBtn").style.display = showExec ? "" : "none";
+      document.getElementById("handoffExecChangeBtn").style.display = showExec ? "" : "none";
 
       try {
         const resp = await fetch(`/workspace/handoff?${params}`);
@@ -2086,7 +2095,12 @@
         contentEl.textContent = text;
         state.handoffPreviewText = text;
         const lines = text.split("\n").length;
-        metaEl.textContent = `${lines} lines · ${text.length.toLocaleString()} chars`;
+        const hasPlan = Boolean((data.handoff || {}).final_plan);
+        // Disable execute buttons if the debate has no final plan yet
+        document.getElementById("handoffExecReviewBtn").disabled = !hasPlan;
+        document.getElementById("handoffExecChangeBtn").disabled = !hasPlan;
+        if (!hasPlan && showExec) metaEl.textContent = `${lines} lines · ${text.length.toLocaleString()} chars  ·  debate incomplete — execute unavailable`;
+        else metaEl.textContent = `${lines} lines · ${text.length.toLocaleString()} chars`;
       } catch (err) {
         contentEl.textContent = `Error: ${err.message}`;
       }
@@ -2095,6 +2109,28 @@
     function closeHandoffPreview() {
       document.getElementById("handoffPreview").classList.remove("visible");
       state.handoffPreviewText = null;
+      state.handoffPreviewDebateId = null;
+    }
+
+    async function executeFromHandoffPreview(executionMode) {
+      const debateId = state.handoffPreviewDebateId;
+      if (!debateId) return;
+      const btn = executionMode === "read_only_v1"
+        ? document.getElementById("handoffExecReviewBtn")
+        : document.getElementById("handoffExecChangeBtn");
+      if (btn) btn.disabled = true;
+      try {
+        await api(`/workspace/debates/${encodeURIComponent(debateId)}/execute-from-handoff`, {
+          method: "POST",
+          body: JSON.stringify({ execution_mode: executionMode, context_import_ids: [] }),
+        });
+        showToast(`Execution proposal created from handoff (${executionMode}).`);
+        closeHandoffPreview();
+        await loadDebates();
+      } catch (error) {
+        showToast(`Execute from handoff error: ${parseError(error)}`, "error");
+        if (btn) btn.disabled = false;
+      }
     }
 
     async function copyHandoffFromPreview() {

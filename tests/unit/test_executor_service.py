@@ -263,3 +263,104 @@ def test_executor_service_manual_plan_context_source_is_manual(isolated_workspac
     result = service.create_execution(project_id="forge", plan="Review the architecture.")
     execution = result["execution"]
     assert execution["proposal"]["context_source"] == "manual"
+
+
+# ── execution from handoff ────────────────────────────────────────────────────
+
+def _finalized_debate(store, *, project_id="forge", context_import_ids=None):
+    debate = store.create_debate(
+        project_id=project_id,
+        topic="Handoff exec topic",
+        bottlenecks="",
+        files=[{"path": "foo.py", "label": "foo.py", "exists": True, "kind": "text", "size_bytes": 0, "preview": "pass"}],
+        participants=[{"provider": "openai", "model": "test-model"}],
+        max_rounds=1,
+        judge_provider="openai",
+        context_import_ids=context_import_ids or [],
+    )
+    store.finalize_debate(debate_id=debate["debate_id"], final_plan={"content": "Deploy the service."}, status="completed")
+    return debate
+
+
+def test_execute_from_handoff_marks_source_type(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    debate = _finalized_debate(store)
+    service = ExecutorService(store=store)
+
+    result = service.create_execution_from_handoff(debate_id=debate["debate_id"])
+    assert result["status"] == "ok"
+    execution = result["execution"]
+    assert execution["source_plan"]["source_type"] == "handoff_v1"
+    assert execution["source_plan"]["content"] == "Deploy the service."
+    assert execution["debate_id"] == debate["debate_id"]
+
+
+def test_execute_from_handoff_inherits_context_import_ids(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    imp = store.create_context_import(project_id="forge", source_label="Ref", content="ctx", category="reference")
+    debate = _finalized_debate(store, context_import_ids=[imp["import_id"]])
+    service = ExecutorService(store=store)
+
+    result = service.create_execution_from_handoff(debate_id=debate["debate_id"])
+    execution = result["execution"]
+    assert imp["import_id"] in execution["context_import_ids"]
+    assert execution["proposal"]["context_source"] == "inherited"
+
+
+def test_execute_from_handoff_preserves_artifacts(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    debate = _finalized_debate(store)
+    service = ExecutorService(store=store)
+
+    result = service.create_execution_from_handoff(debate_id=debate["debate_id"])
+    execution = result["execution"]
+    assert execution["source_plan"]["artifacts"][0]["label"] == "foo.py"
+    assert execution["proposal"]["source"]["artifacts"][0]["label"] == "foo.py"
+
+
+def test_execute_from_handoff_respects_mode(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    debate = _finalized_debate(store)
+    service = ExecutorService(store=store)
+
+    result = service.create_execution_from_handoff(debate_id=debate["debate_id"], execution_mode="change_plan_v1")
+    execution = result["execution"]
+    assert execution["proposal"]["mode"] == "change_plan_v1"
+    assert execution["source_plan"]["source_type"] == "handoff_v1"
+
+
+def test_execute_from_handoff_missing_debate_raises(isolated_workspace_env):
+    service = _executor_service(isolated_workspace_env)
+    with pytest.raises(ValueError, match="debate not found"):
+        service.create_execution_from_handoff(debate_id="deb_ghost")
+
+
+def test_execute_from_handoff_no_final_plan_raises(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    debate = store.create_debate(
+        project_id="forge", topic="Pending", bottlenecks="", files=[],
+        participants=[], max_rounds=1, judge_provider="openai",
+    )
+    service = ExecutorService(store=store)
+    with pytest.raises(ValueError, match="no final plan"):
+        service.create_execution_from_handoff(debate_id=debate["debate_id"])
+
+
+def test_execute_from_handoff_empty_debate_id_raises(isolated_workspace_env):
+    service = _executor_service(isolated_workspace_env)
+    with pytest.raises(ValueError, match="debate_id is required"):
+        service.create_execution_from_handoff(debate_id="")
+
+
+def test_execute_from_handoff_does_not_break_regular_execution(isolated_workspace_env):
+    """Confirm existing create_execution paths still work alongside the new method."""
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    debate = _finalized_debate(store)
+    service = ExecutorService(store=store)
+
+    reg = service.create_execution(project_id="forge", debate_id=debate["debate_id"])
+    hoff = service.create_execution_from_handoff(debate_id=debate["debate_id"])
+
+    assert reg["execution"]["source_plan"].get("source_type") is None
+    assert hoff["execution"]["source_plan"]["source_type"] == "handoff_v1"
+    assert reg["execution"]["execution_id"] != hoff["execution"]["execution_id"]

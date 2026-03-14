@@ -66,6 +66,54 @@ class ExecutorService:
         )
         return {"status": "ok", "execution": execution}
 
+    def create_execution_from_handoff(
+        self,
+        *,
+        debate_id: str,
+        execution_mode: str = "read_only_v1",
+        context_import_ids: List[str] | None = None,
+    ) -> Dict[str, Any]:
+        """Create an execution proposal sourced from a debate's handoff package.
+
+        Identical to create_execution(debate_id=...) in mechanics, but stamps
+        source_plan["source_type"] = "handoff_v1" for auditability and exposes
+        a dedicated endpoint so the UI path is clearly distinct.
+        """
+        normalized_debate_id = str(debate_id or "").strip()
+        if not normalized_debate_id:
+            raise ValueError("debate_id is required for handoff-derived execution")
+        normalized_mode = self._normalize_mode(execution_mode)
+
+        # Inherit context from debate unless explicitly overridden
+        if context_import_ids is not None and len(context_import_ids) > 0:
+            debate_for_ctx = self.store.get_debate(normalized_debate_id)
+            project_id_for_ctx = str((debate_for_ctx or {}).get("project_id") or "")
+            resolved_import_ids = self._resolve_context_import_ids(project_id=project_id_for_ctx, import_ids=context_import_ids)
+            context_source = "override"
+        else:
+            debate_for_ctx = self.store.get_debate(normalized_debate_id)
+            project_id_for_ctx = str((debate_for_ctx or {}).get("project_id") or "")
+            debate_import_ids: List[str] = (debate_for_ctx or {}).get("context_import_ids") or []
+            resolved_import_ids = self._resolve_context_import_ids(project_id=project_id_for_ctx, import_ids=debate_import_ids) if debate_import_ids else []
+            context_source = "inherited"
+
+        # Reuse _source_plan — it validates final_plan existence and extracts artifacts
+        source_plan = self._source_plan(project_id=project_id_for_ctx, debate_id=normalized_debate_id, plan="")
+        source_plan["source_type"] = "handoff_v1"
+        project_id = str(source_plan.get("project_id") or project_id_for_ctx)
+
+        imported_context = self._build_imported_context(project_id=project_id, import_ids=resolved_import_ids)
+        proposal = self._build_proposal(source_plan=source_plan, execution_mode=normalized_mode, imported_context=imported_context)
+        proposal["context_source"] = context_source
+        execution = self.store.create_execution(
+            project_id=project_id,
+            debate_id=normalized_debate_id,
+            source_plan=source_plan,
+            proposal=proposal,
+            context_import_ids=resolved_import_ids,
+        )
+        return {"status": "ok", "execution": execution}
+
     def _resolve_context_import_ids(self, *, project_id: str, import_ids: List[str] | None) -> List[str]:
         if not import_ids:
             return []

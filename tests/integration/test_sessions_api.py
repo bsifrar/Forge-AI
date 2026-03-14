@@ -794,3 +794,85 @@ def test_context_pack_preset_filters_deleted_import_on_apply(monkeypatch, isolat
     data = applied.json()
     assert data["import_ids"] == []
     assert data["filtered_count"] == 1
+
+
+# ── execute-from-handoff integration ─────────────────────────────────────────
+
+def _make_finalized_debate(client, *, project_id="forge"):
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": project_id,
+        "topic": "Handoff exec test",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+    })
+    assert debate_resp.status_code == 200
+    return debate_resp.json()["debate"]
+
+
+def test_execute_from_handoff_endpoint(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    debate = _make_finalized_debate(client)
+    debate_id = debate["debate_id"]
+
+    resp = client.post(f"/workspace/debates/{debate_id}/execute-from-handoff", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    execution = data["execution"]
+    assert execution["debate_id"] == debate_id
+    assert execution["source_plan"]["source_type"] == "handoff_v1"
+    assert execution["status"] == "pending_approval"
+
+
+def test_execute_from_handoff_change_plan_mode(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    debate = _make_finalized_debate(client)
+    resp = client.post(
+        f"/workspace/debates/{debate['debate_id']}/execute-from-handoff",
+        json={"execution_mode": "change_plan_v1"},
+    )
+    assert resp.status_code == 200
+    execution = resp.json()["execution"]
+    assert execution["proposal"]["mode"] == "change_plan_v1"
+    assert execution["source_plan"]["source_type"] == "handoff_v1"
+
+
+def test_execute_from_handoff_missing_debate_is_422(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+    resp = client.post("/workspace/debates/deb_ghost/execute-from-handoff", json={})
+    assert resp.status_code == 422
+
+
+def test_execute_from_handoff_inherits_context_imports(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    imp = client.post("/workspace/context-imports", json={
+        "project_id": "forge", "source_label": "Arch", "content": "arch notes", "category": "reference"
+    }).json()["import"]
+    import_id = imp["import_id"]
+
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Context inheritance via handoff",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+        "context_import_ids": [import_id],
+    })
+    debate_id = debate_resp.json()["debate"]["debate_id"]
+
+    resp = client.post(f"/workspace/debates/{debate_id}/execute-from-handoff", json={})
+    assert resp.status_code == 200
+    execution = resp.json()["execution"]
+    assert import_id in execution["context_import_ids"]
+    assert execution["proposal"]["context_source"] == "inherited"
+    assert execution["source_plan"]["source_type"] == "handoff_v1"

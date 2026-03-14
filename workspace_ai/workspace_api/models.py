@@ -45,6 +45,11 @@ class ExecutionCreateRequest(BaseModel):
     context_import_ids: List[str] = Field(default_factory=list)
 
 
+class ExecutionFromHandoffRequest(BaseModel):
+    execution_mode: str = Field(default="read_only_v1", pattern="^(read_only_v1|change_plan_v1)$")
+    context_import_ids: List[str] = Field(default_factory=list)
+
+
 class ExecutionApprovalRequest(BaseModel):
     approved: bool
     note: str = Field(default="", max_length=4000)

@@ -104,6 +104,21 @@ class SessionManager:
     def get_execution(self, *, execution_id: str) -> Dict[str, Any]:
         return self.executor_service.get_execution(execution_id=execution_id)
 
+    def create_execution_from_handoff(self, *, debate_id: str, execution_mode: str = "read_only_v1", context_import_ids: list[str] | None = None) -> Dict[str, Any]:
+        result = self.executor_service.create_execution_from_handoff(
+            debate_id=debate_id,
+            execution_mode=execution_mode,
+            context_import_ids=context_import_ids or None,
+        )
+        execution = result.get("execution")
+        if isinstance(execution, dict):
+            self.stream_manager.publish(
+                event_type="workspace.execution.created",
+                session_id=None,
+                payload={"execution": execution},
+            )
+        return result
+
     def create_execution(self, *, project_id: str, debate_id: str | None = None, plan: str = "", execution_mode: str = "read_only_v1", context_import_ids: list[str] | None = None) -> Dict[str, Any]:
         result = self.executor_service.create_execution(
             project_id=project_id,
