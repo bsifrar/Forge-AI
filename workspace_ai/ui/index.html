@@ -34,7 +34,7 @@
       --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.55);
       /* Layout */
       --header-h: 50px;
-      --rail-w: 242px;
+      --rail-w: 280px;
       --inspector-w: 264px;
       /* Aliases for inline-style fallbacks */
       --bg-alt: #181b2e;
@@ -471,18 +471,22 @@
     /* ── Tab bar (integrated in sidebar-nav) ─────── */
     .tab-bar { display: flex; gap: 2px; margin-bottom: 0; flex-wrap: nowrap; }
     .tab-bar button {
+      flex: 1;
+      text-align: center;
       background: transparent;
       color: var(--dim);
       border: 1px solid transparent;
       border-bottom: none;
       border-radius: 7px 7px 0 0;
-      padding: 8px 14px;
+      padding: 8px 6px;
       font-size: 11px;
       font-weight: 600;
       letter-spacing: 0.03em;
       transition: color 100ms ease, background 100ms ease;
       box-shadow: none;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .tab-bar button:hover { color: var(--muted); background: rgba(255,255,255,0.025); box-shadow: none; }
     .tab-bar button.active {
@@ -701,7 +705,7 @@
 
     /* ── Responsive ───────────────────────────────── */
     @media (max-width: 1280px) {
-      :root { --rail-w: 226px; --inspector-w: 248px; }
+      :root { --rail-w: 260px; --inspector-w: 248px; }
     }
     @media (max-width: 960px) {
       html, body { height: auto; overflow: auto; }
