@@ -525,6 +525,14 @@
               <option value="side_by_side">Side by Side (independent)</option>
             </select>
           </div>
+          <div style="margin-top:14px;">
+            <div class="field-label">Personal Preferences <span class="muted" style="font-size:0.8em;">injected into every system prompt</span></div>
+            <textarea id="personalPreferences" rows="3" placeholder="e.g. Prefer TypeScript. Keep responses concise. Assume senior engineer audience." style="width:100%; margin-top:6px; resize:vertical;"></textarea>
+          </div>
+          <div style="margin-top:10px;">
+            <div class="field-label">Project Instructions <span class="muted" style="font-size:0.8em;">injected into every system prompt</span></div>
+            <textarea id="projectInstructions" rows="3" placeholder="e.g. This is a Python/FastAPI monorepo. Tests run with pytest. Do not touch the auth module." style="width:100%; margin-top:6px; resize:vertical;"></textarea>
+          </div>
           <div class="settings-grid" style="margin-top:10px;">
             <input id="dailyCap" type="number" step="0.01" placeholder="Daily cap" />
             <input id="hourlyCap" type="number" step="1" placeholder="Hourly cap" />
@@ -536,6 +544,14 @@
             <button class="secondary" onclick="loadAll()">Refresh</button>
           </div>
           <p id="settingsStatus" class="help-text" style="margin-top:10px;">Select a provider, enter its API key, and save.</p>
+        </div>
+        <div class="panel">
+          <div class="toolbar">
+            <h2>Effective Context Preview</h2>
+            <button class="secondary" onclick="loadContextPreview()">Refresh</button>
+          </div>
+          <p class="help-text" style="margin-top:4px; margin-bottom:10px;">What Forge actually sends as the system prompt, assembled from current settings.</p>
+          <pre id="contextPreviewText" style="white-space:pre-wrap; font-size:0.78em; background:var(--bg-alt,#1a1a1a); border:1px solid var(--border,#333); border-radius:4px; padding:10px; max-height:260px; overflow-y:auto; margin:0;" class="muted">Press Refresh to load preview.</pre>
         </div>
         <div class="panel">
           <h2>First-Run Checklist</h2>
@@ -1724,9 +1740,33 @@
       setRole("roleJudge", "judge");
       const debateStyleEl = document.getElementById("debateStyle");
       if (debateStyleEl && s.debate_style) debateStyleEl.value = s.debate_style;
+      const prefEl = document.getElementById("personalPreferences");
+      const instrEl = document.getElementById("projectInstructions");
+      if (prefEl) prefEl.value = s.personal_preferences || "";
+      if (instrEl) instrEl.value = s.project_instructions || "";
       document.getElementById("settingsStatus").textContent = s.api_key_configured
         ? `Settings loaded. ${s.selected_provider || "openai"} key is configured.`
         : "Settings loaded. Enter an API key for the selected provider.";
+    }
+
+    async function loadContextPreview() {
+      const el = document.getElementById("contextPreviewText");
+      if (!el) return;
+      el.textContent = "Loading...";
+      try {
+        const projectId = document.getElementById("projectId")?.value.trim() || "workspace";
+        const data = await api(`/workspace/context/preview?project_id=${encodeURIComponent(projectId)}`);
+        const lines = [
+          `Chat role: ${data.chat_role?.provider || "?"} / ${data.chat_role?.model || "?"}`,
+          `Debate style: ${data.debate_style || "standard"}`,
+          ``,
+          `── System prompt ──────────────────────────────────────────`,
+          data.system_prompt || "[empty]",
+        ];
+        el.textContent = lines.join("\n");
+      } catch (error) {
+        el.textContent = `Error loading preview: ${parseError(error)}`;
+      }
     }
 
     function renderProviderKeySection() {
@@ -1928,6 +1968,8 @@
               judge:   getRole("roleJudge"),
             },
             debate_style: document.getElementById("debateStyle")?.value || null,
+            personal_preferences: document.getElementById("personalPreferences")?.value ?? null,
+            project_instructions: document.getElementById("projectInstructions")?.value ?? null,
           }),
         });
         document.getElementById("apiKey").value = "";
@@ -1935,6 +1977,7 @@
         document.getElementById("anthropicApiKey").value = "";
         persistUIState();
         await loadAll();
+        loadContextPreview();
         statusEl.textContent = options.setup
           ? "First-run setup complete. Workspace is ready."
           : "Settings saved successfully.";

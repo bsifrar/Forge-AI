@@ -197,18 +197,31 @@ class DebateService:
         bottlenecks = str(debate.get("bottlenecks") or "").strip() or "[none]"
         return f"Debate topic: {debate.get('topic', '')}\nBottlenecks: {bottlenecks}\nFiles: {file_labels}"
 
+    def _instruction_context(self) -> str:
+        s = self.settings_service.get()
+        preferences = str(s.get("personal_preferences") or "").strip()
+        instructions = str(s.get("project_instructions") or "").strip()
+        parts = []
+        if preferences:
+            parts.append(f"User preferences: {preferences}")
+        if instructions:
+            parts.append(f"Project instructions: {instructions}")
+        return ("\n".join(parts) + "\n") if parts else ""
+
     def _participant_prompt(self, *, debate: Dict[str, Any], history: List[Dict[str, str]], round_index: int) -> str:
         prior = "\n".join(f"- {item['content']}" for item in history[-4:] if str(item.get("content") or "").strip())
         files = self.artifact_service.prompt_context(debate.get("files") if isinstance(debate.get("files"), list) else [])
         style = str(debate.get("debate_style") or "standard").strip().lower()
         style_instruction = _STYLE_CONFIGS.get(style, "")
         style_line = f"Style instruction: {style_instruction}\n" if style_instruction else ""
+        instr_context = self._instruction_context()
         return (
             f"Round {round_index} debate.\n"
             f"Topic: {debate.get('topic', '')}\n"
             f"Bottlenecks:\n- {str(debate.get('bottlenecks') or '').strip() or '[none]'}\n"
             f"Artifacts:\n{files}\n"
             f"Recent positions:\n{prior or '[none]'}\n"
+            f"{instr_context}"
             f"{style_line}\n"
             "Return valid JSON only with this exact shape:\n"
             '{'
@@ -236,6 +249,7 @@ class DebateService:
                 prompt=(
                     f"Summarize the engineering plan for this debate topic: {debate.get('topic', '')}.\n"
                     "Use the structured round data below. Do not invent new requirements.\n\n"
+                    f"{self._instruction_context()}"
                     f"Structured rounds JSON:\n{json.dumps(structured_rounds, ensure_ascii=True)}\n\n"
                     "Return valid JSON only with this exact shape:\n"
                     '{'

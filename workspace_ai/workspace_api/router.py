@@ -23,6 +23,10 @@ def build_router(manager: SessionManager) -> APIRouter:
     def settings() -> dict:
         return manager.settings()
 
+    @router.get("/context/preview")
+    def context_preview(project_id: str = "workspace") -> dict:
+        return manager.context_preview(project_id=project_id)
+
     @router.post("/settings")
     def update_settings(request: SettingsUpdateRequest) -> dict:
         return manager.update_settings(request.model_dump())

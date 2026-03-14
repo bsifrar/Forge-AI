@@ -68,6 +68,8 @@ class SettingsUpdateRequest(BaseModel):
     anthropic_api_key: str | None = Field(default=None)
     model_roles: Dict[str, Any] | None = Field(default=None)
     debate_style: str | None = Field(default=None, pattern="^(standard|fast|harsh_reviewer|side_by_side)$")
+    personal_preferences: str | None = Field(default=None, max_length=4000)
+    project_instructions: str | None = Field(default=None, max_length=4000)
 
 
 class ChatGPTImportRequest(BaseModel):

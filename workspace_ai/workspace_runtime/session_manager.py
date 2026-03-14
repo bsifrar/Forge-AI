@@ -42,6 +42,30 @@ class SessionManager:
     def _chat_role(self) -> Dict[str, str]:
         return self.settings_service.model_role("chat")
 
+    def _inject_preferences(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        s = self.settings_service.get()
+        context["personal_preferences"] = str(s.get("personal_preferences") or "").strip()
+        context["project_instructions"] = str(s.get("project_instructions") or "").strip()
+        return context
+
+    def context_preview(self, *, project_id: str) -> Dict[str, Any]:
+        s = self.settings_service.get()
+        chat_role = self._chat_role()
+        stub_context = self._inject_preferences({
+            "memory_context": {"summary": "[retrieved memory would appear here]"},
+            "checkpoints": [],
+        })
+        system_prompt = self.chat_service._system_prompt(project_id=project_id, context=stub_context)
+        return {
+            "status": "ok",
+            "project_id": project_id,
+            "chat_role": chat_role,
+            "debate_style": s.get("debate_style", "standard"),
+            "personal_preferences": stub_context["personal_preferences"],
+            "project_instructions": stub_context["project_instructions"],
+            "system_prompt": system_prompt,
+        }
+
     def adapter_status(self) -> Dict[str, Any]:
         return {"status": "ok", "adapter": self.context_service.adapter_health()}
 
@@ -232,7 +256,7 @@ class SessionManager:
         user_message = self.store.add_message(session_id=session_id, role=role, content=content, provider="workspace")
         self.adapter.ingest_message(project_id=session["project_id"], conversation_id=session.get("external_conversation_id") or session_id, role=role, content=content, title=session["title"], metadata={"workspace_session_id": session_id})
         policy = self.policy_service.allow_live_call()
-        context = self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget)
+        context = self._inject_preferences(self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget))
         history = self.store.list_messages(session_id=session_id, limit=40)
         chat_role = self._chat_role()
         selected_model = model or chat_role["model"]
@@ -263,7 +287,7 @@ class SessionManager:
         yield {"type": "workspace.message.received", "message": user_message}
         self.adapter.ingest_message(project_id=session["project_id"], conversation_id=session.get("external_conversation_id") or session_id, role=role, content=content, title=session["title"], metadata={"workspace_session_id": session_id})
         policy = self.policy_service.allow_live_call()
-        context = self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget)
+        context = self._inject_preferences(self.context_service.build_context(project_id=session["project_id"], prompt=content, session_id=session_id, token_budget=token_budget))
         history = self.store.list_messages(session_id=session_id, limit=40)
         chat_role = self._chat_role()
         selected_model = model or chat_role["model"]

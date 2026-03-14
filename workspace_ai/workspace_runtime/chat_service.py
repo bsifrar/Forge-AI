@@ -18,12 +18,18 @@ class ChatService:
             for item in checkpoints[:3]
             if str(item.get("summary") or "").strip()
         )
+        preferences = str(context.get("personal_preferences") or "").strip()
+        instructions = str(context.get("project_instructions") or "").strip()
+        pref_section = f"\nUser preferences:\n{preferences}" if preferences else ""
+        instr_section = f"\nProject instructions:\n{instructions}" if instructions else ""
         return (
             "You are Forge, a persistent AI engineering workspace assistant. Continue the current project conversation, "
             "use provided context, preserve continuity, and stay concise.\n\n"
             f"Active project: {project_id}\n\n"
             f"Retrieved memory context:\n{summary or '[none]'}\n\n"
             f"Recent checkpoints:\n{checkpoint_text or '[none]'}"
+            f"{pref_section}"
+            f"{instr_section}"
         )
 
     def _provider(self, provider_name: str, *, api_key: str | None = None, model: str | None = None) -> LLMProvider:

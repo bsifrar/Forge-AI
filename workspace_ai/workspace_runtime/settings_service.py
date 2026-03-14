@@ -22,6 +22,8 @@ class SettingsService:
             "hourly_call_cap": 50,
             "price_input_per_1m_usd": 0.0,
             "price_output_per_1m_usd": 0.0,
+            "personal_preferences": "",
+            "project_instructions": "",
         }
 
     def api_key(self, provider: str = "openai") -> str:
