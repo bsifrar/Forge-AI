@@ -164,6 +164,168 @@ def test_build_from_execution_with_commands_and_patch(isolated_workspace_env):
     assert h["recommended_next_action"]
 
 
+def test_handoff_package_type_debate_in_header(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    debate = store.create_debate(
+        project_id="proj1", topic="T", bottlenecks="", files=[], participants=[], max_rounds=1, judge_provider="openai",
+    )
+    result = svc.build_from_debate(debate_id=debate["debate_id"])
+    assert "— DEBATE" in result["handoff"]["text"]
+
+
+def test_handoff_package_type_execution_in_header(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    execution = store.create_execution(
+        project_id="proj1",
+        debate_id="",
+        source_plan={"content": "Plan.", "topic": "T", "artifacts": []},
+        proposal={"mode": "read_only_v1", "commands": None, "patch_draft": None, "imported_context": "", "source": {"artifacts": []}, "artifact_summary": ""},
+    )
+    result = svc.build_from_execution(execution_id=execution["execution_id"])
+    assert "— EXECUTION" in result["handoff"]["text"]
+
+
+def test_handoff_includes_mediation_key_differences(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    debate = store.create_debate(
+        project_id="proj1", topic="Arch choice", bottlenecks="", files=[], participants=[], max_rounds=1, judge_provider="openai",
+    )
+    mediation = {
+        "participants": [
+            {"label": "Debate A", "provider": "openai", "model": "gpt-4o",
+             "latest": {"proposal": "Use microservices.", "rationale": "Scales well.", "risks": ["complexity"], "confidence": 0.85, "agreed": False}},
+            {"label": "Debate B", "provider": "xai", "model": "grok-3",
+             "latest": {"proposal": "Use a monolith.", "rationale": "Simpler.", "risks": ["scaling"], "confidence": 0.70, "agreed": False}},
+        ],
+        "key_differences": ["Debate A proposes: Use microservices.\nDebate B proposes: Use a monolith."],
+        "recommended_next_step": "Review the judge plan.",
+    }
+    result = svc.build_from_debate(debate_id=debate["debate_id"], mediation=mediation)
+    h = result["handoff"]
+    text = h["text"]
+    assert h["mediation"] is not None
+    assert "MEDIATION INSIGHTS" in text
+    assert "KEY DIFFERENCES" in text
+    assert "Use microservices." in text
+    assert "Use a monolith." in text
+    assert "MEDIATION RECOMMENDED STEP" in text
+
+
+def test_handoff_mediation_participant_positions_in_text(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    debate = store.create_debate(
+        project_id="proj1", topic="T", bottlenecks="", files=[], participants=[], max_rounds=1, judge_provider="openai",
+    )
+    mediation = {
+        "participants": [
+            {"label": "Debate A", "provider": "openai", "model": "gpt-4o",
+             "latest": {"proposal": "Event sourcing.", "rationale": "Audit trail.", "risks": ["ops-overhead"], "confidence": 0.9, "agreed": True}},
+        ],
+        "key_differences": [],
+        "recommended_next_step": "",
+    }
+    result = svc.build_from_debate(debate_id=debate["debate_id"], mediation=mediation)
+    text = result["handoff"]["text"]
+    assert "PARTICIPANT POSITIONS" in text
+    assert "Debate A" in text
+    assert "openai" in text
+    assert "Event sourcing." in text
+    assert "Confidence : 0.90  |  Agreed: yes" in text
+
+
+def test_handoff_no_mediation_section_when_none(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    debate = store.create_debate(
+        project_id="proj1", topic="T", bottlenecks="", files=[], participants=[], max_rounds=1, judge_provider="openai",
+    )
+    result = svc.build_from_debate(debate_id=debate["debate_id"], mediation=None)
+    assert "MEDIATION" not in result["handoff"]["text"]
+    assert result["handoff"]["mediation"] is None
+
+
+def test_handoff_mediation_snapshot_empty_participants_returns_none(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    debate = store.create_debate(
+        project_id="proj1", topic="T", bottlenecks="", files=[], participants=[], max_rounds=1, judge_provider="openai",
+    )
+    # Empty mediation (no participants, no differences) → snapshot is None
+    result = svc.build_from_debate(debate_id=debate["debate_id"], mediation={"participants": [], "key_differences": [], "recommended_next_step": ""})
+    assert result["handoff"]["mediation"] is None
+    assert "MEDIATION" not in result["handoff"]["text"]
+
+
+def test_handoff_project_instructions_separate_from_preferences(isolated_workspace_env):
+    from workspace_ai.workspace_runtime.settings_service import SettingsService
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    settings_svc = SettingsService(store=store)
+    settings_svc.update({"personal_preferences": "Prefer Python.", "project_instructions": "Use pytest."})
+    svc = HandoffService(store=store, settings_service=settings_svc)
+    debate = store.create_debate(
+        project_id="proj1", topic="T", bottlenecks="", files=[], participants=[], max_rounds=1, judge_provider="openai",
+    )
+    result = svc.build_from_debate(debate_id=debate["debate_id"])
+    text = result["handoff"]["text"]
+    assert "PROJECT INSTRUCTIONS" in text
+    assert "PERSONAL PREFERENCES" in text
+    assert "Use pytest." in text
+    assert "Prefer Python." in text
+    # They must appear as distinct labels, not merged on one line
+    instr_pos = text.index("PROJECT INSTRUCTIONS")
+    prefs_pos = text.index("PERSONAL PREFERENCES")
+    assert instr_pos != prefs_pos
+
+
+def test_handoff_artifact_preview_appears_in_text(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    artifacts = [{"label": "models.py", "path": "models.py", "kind": "text", "size_bytes": 1024, "preview": "class User: pass"}]
+    debate = store.create_debate(
+        project_id="proj1", topic="T", bottlenecks="", files=artifacts, participants=[], max_rounds=1, judge_provider="openai",
+    )
+    result = svc.build_from_debate(debate_id=debate["debate_id"])
+    text = result["handoff"]["text"]
+    assert "models.py" in text
+    assert "class User: pass" in text
+
+
+def test_handoff_commands_have_dollar_prefix(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    execution = store.create_execution(
+        project_id="proj1",
+        debate_id="",
+        source_plan={"content": "Plan.", "topic": "T", "artifacts": []},
+        proposal={
+            "mode": "change_plan_v1",
+            "commands": ["pytest tests/", "git diff"],
+            "patch_draft": None,
+            "imported_context": "",
+            "source": {"artifacts": []},
+            "artifact_summary": "",
+        },
+    )
+    result = svc.build_from_execution(execution_id=execution["execution_id"])
+    text = result["handoff"]["text"]
+    assert "  $ pytest tests/" in text
+    assert "  $ git diff" in text
+
+
+def test_handoff_judge_plan_section_label(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = HandoffService(store=store)
+    debate = store.create_debate(
+        project_id="proj1", topic="T", bottlenecks="", files=[], participants=[], max_rounds=1, judge_provider="openai",
+    )
+    result = svc.build_from_debate(debate_id=debate["debate_id"])
+    assert "JUDGE PLAN" in result["handoff"]["text"]
+
+
 def test_handoff_text_omits_empty_sections(isolated_workspace_env):
     store = SessionStore(db_path=str(isolated_workspace_env))
     svc = HandoffService(store=store)
@@ -180,6 +342,7 @@ def test_handoff_text_omits_empty_sections(isolated_workspace_env):
     result = svc.build_from_debate(debate_id=debate["debate_id"])
     text = result["handoff"]["text"]
     assert "ARTIFACTS" not in text
-    assert "IMPORTED CONTEXT" not in text
+    assert "ACTIVE CONTEXT IMPORTS" not in text
     assert "SUGGESTED COMMANDS" not in text
     assert "PATCH DRAFT" not in text
+    assert "MEDIATION" not in text

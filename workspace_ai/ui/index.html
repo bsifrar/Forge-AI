@@ -659,6 +659,31 @@
     .wizard-choice.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
     .wizard-choice.active:hover { box-shadow: none; }
 
+    /* ── Handoff preview modal ────────────────────── */
+    .handoff-preview-card {
+      width: min(820px, 96vw);
+      max-height: calc(100vh - 48px);
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 12px;
+    }
+    .handoff-preview-body {
+      margin: 0;
+      overflow-y: auto;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11.5px;
+      line-height: 1.65;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-mid) transparent;
+    }
+
     /* ── Overrides for specific IDs ───────────────── */
     #debateContextPackList { border-radius: 8px !important; background: var(--surface-2) !important; }
     #contextPreviewText { border-radius: 8px !important; color: var(--muted) !important; }
@@ -1081,6 +1106,22 @@
     </div>
   </div>
 
+  <div id="handoffPreview" class="wizard-overlay" aria-hidden="true">
+    <div class="wizard-card handoff-preview-card">
+      <div class="toolbar">
+        <div>
+          <h2 style="margin-bottom:0;">Handoff Package</h2>
+          <p id="handoffPreviewMeta" class="muted" style="font-size:11px;margin-top:3px;"></p>
+        </div>
+        <div class="toolbar-actions">
+          <button onclick="copyHandoffFromPreview()">Copy to Clipboard</button>
+          <button class="secondary" onclick="closeHandoffPreview()">Close</button>
+        </div>
+      </div>
+      <pre id="handoffPreviewContent" class="handoff-preview-body">Loading…</pre>
+    </div>
+  </div>
+
   <div id="toast" class="toast" aria-live="polite"></div>
   <script>
     const state = {
@@ -1101,6 +1142,7 @@
       debatesLoading: false,
       executionsByDebateId: {},
       executionPending: {},
+      handoffPreviewText: null,
     };
 
     function draftStorageKey(sessionId) {
@@ -1630,7 +1672,7 @@
           <div class="debate-actions">
             <button class="secondary" onclick='copyDebatePlan(decodeURIComponent(${JSON.stringify(encodeURIComponent((debate.final_plan || {}).content || ""))}))'>Copy Plan</button>
             <button class="secondary" onclick='copyFullDebate(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(debate || {})))})))'>Copy Full Debate</button>
-            <button class="secondary" onclick="copyHandoff('${esc(debate.debate_id || "")}', null)">Copy Handoff</button>
+            <button class="secondary" onclick="openHandoffPreview('${esc(debate.debate_id || "")}', null)">Handoff</button>
           </div>
         </div>
       `).join("");
@@ -1809,7 +1851,7 @@
             `}
             <button class="secondary" onclick='copyExecutionPayload(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(execution || {})))})))'>Copy Execution</button>
             ${executionContent ? `<button class="secondary" onclick='copyExecutionResult(decodeURIComponent(${JSON.stringify(encodeURIComponent(executionContent))}))'>Copy Result</button>` : ""}
-            <button class="secondary" onclick="copyHandoff(null, '${esc(execution.execution_id || "")}')">Copy Handoff</button>
+            <button class="secondary" onclick="openHandoffPreview(null, '${esc(execution.execution_id || "")}')">Handoff</button>
           </div>
         </div>
       `;
@@ -1963,20 +2005,43 @@
       await copyText(lines.join('\n'), 'Mediation summary copied.');
     }
 
-    async function copyHandoff(debateId, executionId) {
+    async function openHandoffPreview(debateId, executionId) {
       const params = new URLSearchParams();
       if (executionId) params.set("execution_id", executionId);
       else if (debateId) params.set("debate_id", debateId);
       else return;
+
+      const overlay = document.getElementById("handoffPreview");
+      const contentEl = document.getElementById("handoffPreviewContent");
+      const metaEl = document.getElementById("handoffPreviewMeta");
+      state.handoffPreviewText = null;
+      overlay.classList.add("visible");
+      contentEl.textContent = "Loading…";
+      metaEl.textContent = "";
+
       try {
         const resp = await fetch(`/workspace/handoff?${params}`);
-        if (!resp.ok) { showToast(`Handoff fetch failed: ${resp.status}`, "error"); return; }
+        if (!resp.ok) { contentEl.textContent = `Error ${resp.status}: failed to load handoff.`; return; }
         const data = await resp.json();
         const text = (data.handoff || {}).text || JSON.stringify(data, null, 2);
-        await copyText(text, "Handoff package copied.");
+        contentEl.textContent = text;
+        state.handoffPreviewText = text;
+        const lines = text.split("\n").length;
+        metaEl.textContent = `${lines} lines · ${text.length.toLocaleString()} chars`;
       } catch (err) {
-        showToast(`Handoff error: ${err.message}`, "error");
+        contentEl.textContent = `Error: ${err.message}`;
       }
+    }
+
+    function closeHandoffPreview() {
+      document.getElementById("handoffPreview").classList.remove("visible");
+      state.handoffPreviewText = null;
+    }
+
+    async function copyHandoffFromPreview() {
+      if (!state.handoffPreviewText) return;
+      await copyText(state.handoffPreviewText, "Handoff package copied.");
+      closeHandoffPreview();
     }
 
     function renderMessages(messages = []) {

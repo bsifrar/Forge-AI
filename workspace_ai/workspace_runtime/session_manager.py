@@ -209,7 +209,9 @@ class SessionManager:
         if execution_id:
             return self.handoff_service.build_from_execution(execution_id=execution_id)
         if debate_id:
-            return self.handoff_service.build_from_debate(debate_id=debate_id)
+            med_result = self.mediation_service.get_mediation(debate_id=debate_id)
+            mediation = med_result.get("mediation") if med_result.get("status") == "ok" else None
+            return self.handoff_service.build_from_debate(debate_id=debate_id, mediation=mediation)
         return {"status": "error", "detail": "debate_id or execution_id required"}
 
     def search_sessions(self, *, query: str, project_id: str | None = None, limit: int = 25) -> Dict[str, Any]:
