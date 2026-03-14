@@ -516,6 +516,15 @@
               <input id="roleJudgeModel" placeholder="Model" />
             </div>
           </div>
+          <div style="margin-top:14px;">
+            <div class="field-label">Default Debate Style</div>
+            <select id="debateStyle" style="margin-top:6px; width:100%;">
+              <option value="standard">Standard</option>
+              <option value="fast">Fast (rapid convergence)</option>
+              <option value="harsh_reviewer">Harsh Reviewer (critical)</option>
+              <option value="side_by_side">Side by Side (independent)</option>
+            </select>
+          </div>
           <div class="settings-grid" style="margin-top:10px;">
             <input id="dailyCap" type="number" step="0.01" placeholder="Daily cap" />
             <input id="hourlyCap" type="number" step="1" placeholder="Hourly cap" />
@@ -615,6 +624,15 @@
             <select id="debateJudge">
               <option value="openai" selected>OpenAI</option>
               <option value="xai">xAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+            <div class="field-label">Style <span class="muted" id="debateStyleHint" style="font-size:0.8em;"></span></div>
+            <select id="debateStyleOverride" onchange="updateDebateStyleHint()">
+              <option value="">Default (from settings)</option>
+              <option value="standard">Standard</option>
+              <option value="fast">Fast — hint: 2 rounds</option>
+              <option value="harsh_reviewer">Harsh Reviewer — hint: 5 rounds</option>
+              <option value="side_by_side">Side by Side — hint: 3 rounds</option>
             </select>
             <button id="startDebateBtn" onclick="startDebate()">Start Debate</button>
           </div>
@@ -774,6 +792,16 @@
       const input = document.getElementById("debateFilePicker");
       if (!input || !input.files) return [];
       return Array.from(input.files);
+    }
+
+    function updateDebateStyleHint() {
+      const style = document.getElementById("debateStyleOverride")?.value || "";
+      const hintEl = document.getElementById("debateStyleHint");
+      const roundsEl = document.getElementById("debateMaxRounds");
+      const hints = { fast: "suggested: 2 rounds", harsh_reviewer: "suggested: 5 rounds", side_by_side: "suggested: 3 rounds" };
+      const rounds = { fast: 2, harsh_reviewer: 5, side_by_side: 3 };
+      if (hintEl) hintEl.textContent = hints[style] || "";
+      if (roundsEl && rounds[style]) roundsEl.value = rounds[style];
     }
 
     function updateDebateFileSummary() {
@@ -1249,7 +1277,7 @@
         <div class="debate-card">
           <h3>${esc(debate.topic || debate.debate_id)}</h3>
           <div class="meta">
-            ${esc(debate.project_id || "forge")} · ${esc(debate.debate_id || "")} · ${esc(debate.status || "unknown")}
+            ${esc(debate.project_id || "forge")} · ${esc(debate.debate_id || "")} · ${esc(debate.status || "unknown")}${debate.debate_style && debate.debate_style !== "standard" ? ` · <span class="pill">${esc(debate.debate_style)}</span>` : ""}
           </div>
           <div class="help-text">Participants: ${esc((debate.participants || []).map(item => `${item.provider || "unknown"} (${item.model || "default"})`).join(", ") || "none")}</div>
           <div class="help-text">Rounds: ${esc((debate.rounds || []).length)} / ${esc(debate.max_rounds || 5)}</div>
@@ -1694,6 +1722,8 @@
       setRole("roleDebateA", "debate_a");
       setRole("roleDebateB", "debate_b");
       setRole("roleJudge", "judge");
+      const debateStyleEl = document.getElementById("debateStyle");
+      if (debateStyleEl && s.debate_style) debateStyleEl.value = s.debate_style;
       document.getElementById("settingsStatus").textContent = s.api_key_configured
         ? `Settings loaded. ${s.selected_provider || "openai"} key is configured.`
         : "Settings loaded. Enter an API key for the selected provider.";
@@ -1897,6 +1927,7 @@
               debate_b: getRole("roleDebateB"),
               judge:   getRole("roleJudge"),
             },
+            debate_style: document.getElementById("debateStyle")?.value || null,
           }),
         });
         document.getElementById("apiKey").value = "";
@@ -2069,6 +2100,7 @@
       const participantSelect = document.getElementById("debateParticipants");
       const participants = Array.from(participantSelect.selectedOptions).map(option => JSON.parse(option.value));
       const judgeProvider = document.getElementById("debateJudge").value;
+      const debateStyleOverride = document.getElementById("debateStyleOverride")?.value || null;
       const statusEl = document.getElementById("debateStatus");
 
       if (!topic) {
@@ -2097,6 +2129,7 @@
             participants,
             max_rounds: maxRounds,
             judge_provider: judgeProvider,
+            debate_style: debateStyleOverride || null,
           }),
         });
         localStorage.setItem(
@@ -2105,6 +2138,7 @@
             project_id: projectId,
             max_rounds: maxRounds,
             judge_provider: judgeProvider,
+            debate_style: debateStyleOverride || "",
             bottlenecks,
           })
         );
@@ -2214,6 +2248,7 @@
       if (savedDebateDefaults.project_id) document.getElementById("debateProjectId").value = savedDebateDefaults.project_id;
       if (savedDebateDefaults.max_rounds) document.getElementById("debateMaxRounds").value = savedDebateDefaults.max_rounds;
       if (savedDebateDefaults.judge_provider) document.getElementById("debateJudge").value = savedDebateDefaults.judge_provider;
+      if (savedDebateDefaults.debate_style) { const el = document.getElementById("debateStyleOverride"); if (el) el.value = savedDebateDefaults.debate_style; }
       if (savedDebateDefaults.bottlenecks) document.getElementById("debateBottlenecks").value = savedDebateDefaults.bottlenecks;
     } catch (error) {
       localStorage.removeItem(debateDefaultsStorageKey());

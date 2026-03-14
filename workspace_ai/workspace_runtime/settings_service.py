@@ -17,6 +17,7 @@ class SettingsService:
             "api_enabled": bool(settings.openai_api_key or settings.xai_api_key or settings.anthropic_api_key),
             "selected_provider": settings.default_provider,
             "selected_model": settings.default_model,
+            "debate_style": "standard",
             "daily_spend_cap_usd": 5.0,
             "hourly_call_cap": 50,
             "price_input_per_1m_usd": 0.0,

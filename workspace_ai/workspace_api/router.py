@@ -54,6 +54,7 @@ def build_router(manager: SessionManager) -> APIRouter:
                 participants=[participant.model_dump() for participant in request.participants],
                 max_rounds=request.max_rounds,
                 judge_provider=request.judge_provider,
+                debate_style=request.debate_style,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

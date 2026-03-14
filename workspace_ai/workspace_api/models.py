@@ -33,6 +33,7 @@ class DebateCreateRequest(BaseModel):
     participants: List[DebateParticipantRequest] = Field(default_factory=list)
     max_rounds: int = Field(default=5, ge=1, le=20)
     judge_provider: str | None = Field(default=None, pattern="^(openai|xai|anthropic)$")
+    debate_style: str | None = Field(default=None, pattern="^(standard|fast|harsh_reviewer|side_by_side)$")
 
 
 class ExecutionCreateRequest(BaseModel):
@@ -66,6 +67,7 @@ class SettingsUpdateRequest(BaseModel):
     xai_api_key: str | None = Field(default=None)
     anthropic_api_key: str | None = Field(default=None)
     model_roles: Dict[str, Any] | None = Field(default=None)
+    debate_style: str | None = Field(default=None, pattern="^(standard|fast|harsh_reviewer|side_by_side)$")
 
 
 class ChatGPTImportRequest(BaseModel):

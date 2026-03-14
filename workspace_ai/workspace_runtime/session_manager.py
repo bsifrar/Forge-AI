@@ -94,6 +94,7 @@ class SessionManager:
         participants: list[Dict[str, Any]] | None = None,
         max_rounds: int = 5,
         judge_provider: str | None = None,
+        debate_style: str | None = None,
     ) -> Dict[str, Any]:
         result = self.debate_service.start_debate(
             project_id=project_id,
@@ -103,6 +104,7 @@ class SessionManager:
             participants=participants,
             max_rounds=max_rounds,
             judge_provider=judge_provider,
+            debate_style=debate_style,
         )
         debate = result.get("debate")
         if isinstance(debate, dict):

@@ -10,6 +10,25 @@ from workspace_ai.workspace_runtime.chat_service import ChatService
 from workspace_ai.workspace_runtime.settings_service import SettingsService
 
 
+_VALID_STYLES = {"standard", "fast", "harsh_reviewer", "side_by_side"}
+
+_STYLE_CONFIGS: Dict[str, str] = {
+    "standard": "",
+    "fast": (
+        "Be concise. Aim for rapid convergence. Skip lengthy preambles and reach a "
+        "working recommendation quickly. Prefer agreement over exhaustive analysis."
+    ),
+    "harsh_reviewer": (
+        "Be a rigorous critic. Challenge every assumption and expose weaknesses before "
+        "proposing improvements. Do not soften your critique."
+    ),
+    "side_by_side": (
+        "Present your own position completely and independently. Do not react to or "
+        "acknowledge other positions — state your case on its own merits."
+    ),
+}
+
+
 class DebateService:
     def __init__(self, *, store: SessionStore, settings_service: SettingsService, max_rounds: int = 5) -> None:
         self.store = store
@@ -51,12 +70,14 @@ class DebateService:
         participants: List[Dict[str, Any]] | None = None,
         max_rounds: int = 5,
         judge_provider: str | None = None,
+        debate_style: str | None = None,
     ) -> Dict[str, Any]:
         active_participants = self._normalize_participants(participants)
         bounded_rounds = max(1, min(20, int(max_rounds)))
         default_judge_provider = self.settings_service.model_role("judge")["provider"]
         normalized_judge = self._normalize_provider(judge_provider or default_judge_provider, field_name="judge_provider")
         normalized_files = self.artifact_service.normalize_inputs(files)
+        resolved_style = self._resolve_style(debate_style)
         debate = self.store.create_debate(
             project_id=project_id,
             topic=topic,
@@ -65,8 +86,16 @@ class DebateService:
             participants=active_participants,
             max_rounds=bounded_rounds,
             judge_provider=normalized_judge,
+            debate_style=resolved_style,
         )
         return self.run_debate(debate_id=str(debate["debate_id"]), max_rounds=int(debate.get("max_rounds") or max_rounds))
+
+    def _resolve_style(self, style: str | None) -> str:
+        candidate = str(style or "").strip().lower()
+        if candidate in _VALID_STYLES:
+            return candidate
+        stored = str(self.settings_service.get().get("debate_style") or "standard").strip().lower()
+        return stored if stored in _VALID_STYLES else "standard"
 
     def run_debate(self, *, debate_id: str, max_rounds: int | None = None) -> Dict[str, Any]:
         debate = self.store.get_debate(debate_id)
@@ -171,12 +200,16 @@ class DebateService:
     def _participant_prompt(self, *, debate: Dict[str, Any], history: List[Dict[str, str]], round_index: int) -> str:
         prior = "\n".join(f"- {item['content']}" for item in history[-4:] if str(item.get("content") or "").strip())
         files = self.artifact_service.prompt_context(debate.get("files") if isinstance(debate.get("files"), list) else [])
+        style = str(debate.get("debate_style") or "standard").strip().lower()
+        style_instruction = _STYLE_CONFIGS.get(style, "")
+        style_line = f"Style instruction: {style_instruction}\n" if style_instruction else ""
         return (
             f"Round {round_index} debate.\n"
             f"Topic: {debate.get('topic', '')}\n"
             f"Bottlenecks:\n- {str(debate.get('bottlenecks') or '').strip() or '[none]'}\n"
             f"Artifacts:\n{files}\n"
-            f"Recent positions:\n{prior or '[none]'}\n\n"
+            f"Recent positions:\n{prior or '[none]'}\n"
+            f"{style_line}\n"
             "Return valid JSON only with this exact shape:\n"
             '{'
             '"proposal": "concise engineering recommendation", '

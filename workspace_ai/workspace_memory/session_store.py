@@ -132,6 +132,8 @@ class SessionStore:
             }
             if "max_rounds" not in debate_columns:
                 conn.execute("ALTER TABLE debates ADD COLUMN max_rounds INTEGER NOT NULL DEFAULT 5")
+            if "debate_style" not in debate_columns:
+                conn.execute("ALTER TABLE debates ADD COLUMN debate_style TEXT NOT NULL DEFAULT 'standard'")
             conn.commit()
 
     def create_session(self, *, project_id: str, title: str, mode: str, source: str = "workspace", external_conversation_id: str = "", external_title: str = "") -> Dict[str, Any]:
@@ -316,6 +318,7 @@ class SessionStore:
         participants: List[Dict[str, Any]],
         max_rounds: int,
         judge_provider: str,
+        debate_style: str = "standard",
     ) -> Dict[str, Any]:
         debate_id = f"deb_{uuid.uuid4().hex[:12]}"
         now = self._now_iso()
@@ -324,9 +327,9 @@ class SessionStore:
                 """
                 INSERT INTO debates(
                     debate_id, project_id, topic, bottlenecks, files_json, participants_json, max_rounds,
-                    judge_provider, final_plan_json, status, created_at, updated_at
+                    judge_provider, debate_style, final_plan_json, status, created_at, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, '{}', 'pending', ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'pending', ?, ?)
                 """,
                 (
                     debate_id,
@@ -337,6 +340,7 @@ class SessionStore:
                     self._json(participants),
                     int(max_rounds),
                     judge_provider,
+                    debate_style,
                     now,
                     now,
                 ),
