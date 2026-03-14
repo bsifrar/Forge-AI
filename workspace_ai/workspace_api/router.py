@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, ContextImportCreateRequest, ContextImportEnabledRequest, DebateCreateRequest, EventListResponse, ExecutionApprovalRequest, ExecutionCreateRequest, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
+from workspace_ai.workspace_api.models import BootstrapSetupRequest, ChatGPTImportRequest, CloneSessionRequest, ContextImportCreateRequest, ContextImportEnabledRequest, ContextPackPresetCreateRequest, ContextPackPresetUpdateRequest, DebateCreateRequest, EventListResponse, ExecutionApprovalRequest, ExecutionCreateRequest, MessageCreateRequest, ResumeImportedSessionRequest, SessionCreateRequest, SessionStatusUpdateRequest, SettingsUpdateRequest
 from workspace_ai.workspace_api.streaming import encode_sse_stream
 from workspace_ai.workspace_runtime.session_manager import SessionManager
 
@@ -54,6 +54,41 @@ def build_router(manager: SessionManager) -> APIRouter:
     @router.delete("/context-imports/{import_id}")
     def delete_context_import(import_id: str) -> dict:
         return manager.delete_context_import(import_id=import_id)
+
+    @router.post("/context-pack-presets")
+    def create_context_pack_preset(request: ContextPackPresetCreateRequest) -> dict:
+        result = manager.create_context_pack_preset(
+            project_id=request.project_id, name=request.name, import_ids=request.import_ids
+        )
+        if result.get("status") == "error":
+            raise HTTPException(status_code=422, detail=result.get("detail"))
+        return result
+
+    @router.get("/context-pack-presets")
+    def list_context_pack_presets(project_id: str | None = None) -> dict:
+        return manager.list_context_pack_presets(project_id=project_id)
+
+    @router.get("/context-pack-presets/{preset_id}/apply")
+    def apply_context_pack_preset(preset_id: str, project_id: str) -> dict:
+        result = manager.apply_context_pack_preset(preset_id=preset_id, project_id=project_id)
+        if result.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=f"Preset not found: {preset_id}")
+        return result
+
+    @router.post("/context-pack-presets/{preset_id}")
+    def update_context_pack_preset(preset_id: str, request: ContextPackPresetUpdateRequest) -> dict:
+        result = manager.update_context_pack_preset(
+            preset_id=preset_id, name=request.name, import_ids=request.import_ids
+        )
+        if result.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=f"Preset not found: {preset_id}")
+        if result.get("status") == "error":
+            raise HTTPException(status_code=422, detail=result.get("detail"))
+        return result
+
+    @router.delete("/context-pack-presets/{preset_id}")
+    def delete_context_pack_preset(preset_id: str) -> dict:
+        return manager.delete_context_pack_preset(preset_id=preset_id)
 
     @router.get("/handoff")
     def get_handoff(debate_id: str | None = None, execution_id: str | None = None) -> dict:

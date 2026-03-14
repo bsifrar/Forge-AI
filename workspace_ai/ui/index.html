@@ -982,6 +982,14 @@
             </select>
             <div class="field-label">Context Pack <span class="muted" style="font-size:0.8em;">leave empty to use project defaults (enabled imports)</span></div>
             <div id="debateContextPackList" style="max-height:120px; overflow-y:auto; border:1px solid var(--border,#333); border-radius:4px; padding:6px;" class="muted">No imported context items. Add some in Settings → Imported Context.</div>
+            <div style="margin-top:5px; display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+              <select id="debatePresetSelect" style="flex:1; min-width:0; font-size:0.82em;">
+                <option value="">— apply a preset —</option>
+              </select>
+              <button class="secondary" style="padding:3px 9px; font-size:11px;" onclick="applyDebatePreset()">Apply</button>
+              <button class="secondary" style="padding:3px 9px; font-size:11px;" onclick="saveDebatePreset()">Save as preset</button>
+              <button class="secondary" style="padding:3px 9px; font-size:11px; color:#e57373;" onclick="deleteDebatePreset()">Delete</button>
+            </div>
             <button id="startDebateBtn" onclick="startDebate()">Start Debate</button>
           </div>
           <p id="debateStatus" class="help-text" style="margin-top:10px;">Start a bounded multi-provider debate from here.</p>
@@ -1149,6 +1157,7 @@
       handoffPreviewText: null,
       executionContextOverride: {},  // debateId → List[string] (null key means use inherited)
       contextOverrideOpen: null,     // debateId | null
+      contextPackPresets: [],        // List of {preset_id, project_id, name, import_ids}
     };
 
     function draftStorageKey(sessionId) {
@@ -1767,8 +1776,17 @@
                 ${esc(item.source_label || item.import_id)} <span class="pill" style="font-size:10px;">${esc(item.category || "")}</span>
               </label>
             `).join("") : `<div class="muted" style="font-size:12px;">No context imports in this project.</div>`}
-            <div style="margin-top:8px; display:flex; gap:6px;">
-              <button class="secondary" style="padding:3px 10px; font-size:11px;" onclick="clearContextOverride('${esc(debate.debate_id || "")}')">Clear override</button>
+            <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+              ${(() => {
+                const projectPresets = (state.contextPackPresets || []).filter(p => p.project_id === projectId);
+                const opts = projectPresets.map(p => `<option value="${esc(p.preset_id)}">${esc(p.name)} (${(p.import_ids || []).length})</option>`).join("");
+                return projectPresets.length
+                  ? `<select id="execPreset-${esc(debate.debate_id || "")}" style="flex:1; min-width:0; font-size:11px;"><option value="">— apply a preset —</option>${opts}</select>
+                     <button class="secondary" style="padding:2px 8px; font-size:11px;" onclick="applyExecutionPresetFromPanel('${esc(debate.debate_id || "")}', '${esc(projectId)}', ${JSON.stringify(debateImportIds)})">Apply</button>`
+                  : `<span class="muted" style="font-size:11px;">No presets for this project.</span>`;
+              })()}
+              <button class="secondary" style="padding:2px 8px; font-size:11px;" onclick="saveExecutionPreset('${esc(debate.debate_id || "")}', '${esc(projectId)}')">Save as preset</button>
+              <button class="secondary" style="padding:3px 10px; font-size:11px;" onclick="clearContextOverride('${esc(debate.debate_id || "")}')">Clear</button>
               <button class="secondary" style="padding:3px 10px; font-size:11px;" onclick="closeContextOverridePanel()">Done</button>
             </div>
           </div>
@@ -2347,18 +2365,72 @@
       const imports = (state.contextImports || []).filter(item => item.project_id === projectId);
       if (!imports.length) {
         el.innerHTML = `<span class="muted" style="font-size:0.85em;">No imported context for project "${projectId}". Add some in Settings → Imported Context.</span>`;
-        return;
+      } else {
+        el.innerHTML = imports.map(item => `
+          <label style="display:flex; align-items:flex-start; gap:6px; margin-bottom:4px; cursor:pointer; font-size:0.85em;">
+            <input type="checkbox" class="debate-context-pack-cb" value="${esc(item.import_id)}" ${item.enabled ? "checked" : ""} style="margin-top:2px;" />
+            <span>
+              <strong>${esc(item.source_label || item.import_id)}</strong>
+              <span class="pill" style="margin-left:4px;">${esc(item.category)}</span>
+              ${!item.enabled ? '<span class="muted" style="font-size:0.8em;">(disabled by default)</span>' : ""}
+            </span>
+          </label>
+        `).join("");
       }
-      el.innerHTML = imports.map(item => `
-        <label style="display:flex; align-items:flex-start; gap:6px; margin-bottom:4px; cursor:pointer; font-size:0.85em;">
-          <input type="checkbox" class="debate-context-pack-cb" value="${esc(item.import_id)}" ${item.enabled ? "checked" : ""} style="margin-top:2px;" />
-          <span>
-            <strong>${esc(item.source_label || item.import_id)}</strong>
-            <span class="pill" style="margin-left:4px;">${esc(item.category)}</span>
-            ${!item.enabled ? '<span class="muted" style="font-size:0.8em;">(disabled by default)</span>' : ""}
-          </span>
-        </label>
-      `).join("");
+      // Populate preset dropdown
+      const presetSel = document.getElementById("debatePresetSelect");
+      if (presetSel) {
+        const projectPresets = (state.contextPackPresets || []).filter(p => p.project_id === projectId);
+        presetSel.innerHTML = `<option value="">— apply a preset —</option>` +
+          projectPresets.map(p => `<option value="${esc(p.preset_id)}">${esc(p.name)} (${(p.import_ids || []).length})</option>`).join("");
+      }
+    }
+
+    async function loadContextPackPresets() {
+      try {
+        const data = await api("/workspace/context-pack-presets");
+        state.contextPackPresets = data.presets || [];
+        renderDebateContextPack();
+      } catch (_) { /* non-critical */ }
+    }
+
+    async function applyDebatePreset() {
+      const presetId = document.getElementById("debatePresetSelect")?.value;
+      if (!presetId) { showToast("Select a preset first.", "error"); return; }
+      const projectId = document.getElementById("debateProjectId")?.value.trim() || "forge";
+      try {
+        const data = await api(`/workspace/context-pack-presets/${encodeURIComponent(presetId)}/apply?project_id=${encodeURIComponent(projectId)}`);
+        const validIds = data.import_ids || [];
+        document.querySelectorAll(".debate-context-pack-cb").forEach(cb => { cb.checked = validIds.includes(cb.value); });
+        showToast(`Preset applied: ${validIds.length} import(s).`);
+      } catch (error) { showToast(`Apply error: ${parseError(error)}`, "error"); }
+    }
+
+    async function saveDebatePreset() {
+      const projectId = document.getElementById("debateProjectId")?.value.trim() || "forge";
+      const name = window.prompt("Preset name:", "");
+      if (!name?.trim()) return;
+      const currentIds = Array.from(document.querySelectorAll(".debate-context-pack-cb:checked")).map(cb => cb.value);
+      try {
+        await api("/workspace/context-pack-presets", {
+          method: "POST",
+          body: JSON.stringify({ project_id: projectId, name: name.trim(), import_ids: currentIds }),
+        });
+        showToast(`Preset "${name.trim()}" saved.`);
+        await loadContextPackPresets();
+      } catch (error) { showToast(`Save error: ${parseError(error)}`, "error"); }
+    }
+
+    async function deleteDebatePreset() {
+      const presetId = document.getElementById("debatePresetSelect")?.value;
+      if (!presetId) { showToast("Select a preset to delete.", "error"); return; }
+      const preset = (state.contextPackPresets || []).find(p => p.preset_id === presetId);
+      if (!window.confirm(`Delete preset "${preset?.name || presetId}"?`)) return;
+      try {
+        await api(`/workspace/context-pack-presets/${encodeURIComponent(presetId)}`, { method: "DELETE" });
+        showToast("Preset deleted.");
+        await loadContextPackPresets();
+      } catch (error) { showToast(`Delete error: ${parseError(error)}`, "error"); }
     }
 
     async function loadContextImports() {
@@ -2540,6 +2612,33 @@
       renderDebates(state.debates || []);
     }
 
+    async function applyExecutionPresetFromPanel(debateId, projectId, debateImportIds) {
+      const sel = document.getElementById(`execPreset-${debateId}`);
+      const presetId = sel?.value;
+      if (!presetId) { showToast("Select a preset first.", "error"); return; }
+      try {
+        const data = await api(`/workspace/context-pack-presets/${encodeURIComponent(presetId)}/apply?project_id=${encodeURIComponent(projectId)}`);
+        state.executionContextOverride[debateId] = data.import_ids || [];
+        renderDebates(state.debates || []);
+        showToast(`Preset applied: ${(data.import_ids || []).length} import(s).`);
+      } catch (error) { showToast(`Apply error: ${parseError(error)}`, "error"); }
+    }
+
+    async function saveExecutionPreset(debateId, projectId) {
+      const name = window.prompt("Preset name:", "");
+      if (!name?.trim()) return;
+      const debate = (state.debates || []).find(d => d.debate_id === debateId) || {};
+      const currentIds = state.executionContextOverride[debateId] ?? (debate.context_import_ids || []);
+      try {
+        await api("/workspace/context-pack-presets", {
+          method: "POST",
+          body: JSON.stringify({ project_id: projectId, name: name.trim(), import_ids: currentIds }),
+        });
+        showToast(`Preset "${name.trim()}" saved.`);
+        await loadContextPackPresets();
+      } catch (error) { showToast(`Save error: ${parseError(error)}`, "error"); }
+    }
+
     async function createExecutionFromDebate(debateId, executionMode = "read_only_v1") {
       if (!debateId) return;
       state.executionPending[debateId] = true;
@@ -2615,7 +2714,7 @@
     }
 
     async function loadAll() {
-      await Promise.all([loadStatus(), loadSettings(), loadSessions(), loadMeta(), loadDebates(), loadContextImports()]);
+      await Promise.all([loadStatus(), loadSettings(), loadSessions(), loadMeta(), loadDebates(), loadContextImports(), loadContextPackPresets()]);
       renderStatus();
       renderSessions();
       await loadMessages();

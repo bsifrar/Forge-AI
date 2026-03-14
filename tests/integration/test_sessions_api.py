@@ -707,3 +707,90 @@ def test_mediation_single_participant_has_no_key_differences(monkeypatch, isolat
     med = resp.json()["mediation"]
     assert len(med["participants"]) == 1
     assert med["key_differences"] == []
+
+
+def test_context_pack_preset_crud(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    imp = client.post("/workspace/context-imports", json={
+        "project_id": "forge", "source_label": "Arch doc", "content": "architecture notes", "category": "reference"
+    })
+    assert imp.status_code == 200
+    import_id = imp.json()["import"]["import_id"]
+
+    # Create preset
+    resp = client.post("/workspace/context-pack-presets", json={
+        "project_id": "forge", "name": "Core Docs", "import_ids": [import_id]
+    })
+    assert resp.status_code == 200
+    preset = resp.json()["preset"]
+    preset_id = preset["preset_id"]
+    assert preset["name"] == "Core Docs"
+    assert import_id in preset["import_ids"]
+
+    # List presets
+    listed = client.get("/workspace/context-pack-presets", params={"project_id": "forge"})
+    assert listed.status_code == 200
+    assert listed.json()["count"] == 1
+
+    # Apply preset
+    applied = client.get(f"/workspace/context-pack-presets/{preset_id}/apply", params={"project_id": "forge"})
+    assert applied.status_code == 200
+    data = applied.json()
+    assert data["status"] == "ok"
+    assert import_id in data["import_ids"]
+    assert data["filtered_count"] == 0
+
+    # Update preset name
+    updated = client.post(f"/workspace/context-pack-presets/{preset_id}", json={"name": "Renamed"})
+    assert updated.status_code == 200
+    assert updated.json()["preset"]["name"] == "Renamed"
+
+    # Delete preset
+    deleted = client.delete(f"/workspace/context-pack-presets/{preset_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "ok"
+    assert client.get("/workspace/context-pack-presets", params={"project_id": "forge"}).json()["count"] == 0
+
+
+def test_context_pack_preset_apply_missing_returns_404(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+    resp = client.get("/workspace/context-pack-presets/cxpre_ghost/apply", params={"project_id": "forge"})
+    assert resp.status_code == 404
+
+
+def test_context_pack_preset_invalid_name_returns_422(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+    resp = client.post("/workspace/context-pack-presets", json={
+        "project_id": "forge", "name": "", "import_ids": []
+    })
+    assert resp.status_code == 422
+
+
+def test_context_pack_preset_filters_deleted_import_on_apply(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    imp = client.post("/workspace/context-imports", json={
+        "project_id": "forge", "source_label": "Temp", "content": "transient", "category": "transient"
+    })
+    import_id = imp.json()["import"]["import_id"]
+
+    preset = client.post("/workspace/context-pack-presets", json={
+        "project_id": "forge", "name": "With deleted", "import_ids": [import_id]
+    }).json()["preset"]
+
+    client.delete(f"/workspace/context-imports/{import_id}")
+
+    applied = client.get(f"/workspace/context-pack-presets/{preset['preset_id']}/apply", params={"project_id": "forge"})
+    assert applied.status_code == 200
+    data = applied.json()
+    assert data["import_ids"] == []
+    assert data["filtered_count"] == 1

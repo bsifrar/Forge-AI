@@ -121,6 +121,17 @@ class ContextImportEnabledRequest(BaseModel):
     enabled: bool
 
 
+class ContextPackPresetCreateRequest(BaseModel):
+    project_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=200)
+    import_ids: List[str] = Field(default_factory=list)
+
+
+class ContextPackPresetUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    import_ids: List[str] | None = Field(default=None)
+
+
 class EventListResponse(BaseModel):
     session_id: str | None = Field(default=None)
     count: int

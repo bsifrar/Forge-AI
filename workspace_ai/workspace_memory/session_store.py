@@ -155,6 +155,18 @@ class SessionStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS context_pack_presets (
+                    preset_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    import_ids_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
 
     def create_session(self, *, project_id: str, title: str, mode: str, source: str = "workspace", external_conversation_id: str = "", external_title: str = "") -> Dict[str, Any]:
@@ -666,3 +678,68 @@ class SessionStore:
                 (project_id,),
             ).fetchall()
         return [self._row_to_context_import(r) for r in rows]
+
+    # ── context_pack_presets ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _row_to_preset(row: sqlite3.Row) -> Dict[str, Any]:
+        parsed = dict(row)
+        parsed["import_ids"] = json.loads(parsed.pop("import_ids_json", "[]"))
+        return parsed
+
+    def create_context_pack_preset(self, *, project_id: str, name: str, import_ids: List[str]) -> Dict[str, Any]:
+        preset_id = f"cxpre_{uuid.uuid4().hex[:12]}"
+        now = self._now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO context_pack_presets(preset_id, project_id, name, import_ids_json, created_at, updated_at)
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                (preset_id, project_id, name.strip(), self._json(import_ids), now, now),
+            )
+            conn.commit()
+        return self.get_context_pack_preset(preset_id) or {}
+
+    def get_context_pack_preset(self, preset_id: str) -> Dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM context_pack_presets WHERE preset_id = ?", (preset_id,)).fetchone()
+        return self._row_to_preset(row) if row else None
+
+    def list_context_pack_presets(self, *, project_id: str | None = None) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM context_pack_presets"
+        params: list[Any] = []
+        if project_id:
+            sql += " WHERE project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY updated_at DESC"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._row_to_preset(r) for r in rows]
+
+    def update_context_pack_preset(
+        self,
+        *,
+        preset_id: str,
+        name: str | None = None,
+        import_ids: List[str] | None = None,
+    ) -> Dict[str, Any] | None:
+        existing = self.get_context_pack_preset(preset_id)
+        if existing is None:
+            return None
+        now = self._now_iso()
+        new_name = name.strip() if name is not None else existing["name"]
+        new_ids = import_ids if import_ids is not None else existing["import_ids"]
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE context_pack_presets SET name = ?, import_ids_json = ?, updated_at = ? WHERE preset_id = ?",
+                (new_name, self._json(new_ids), now, preset_id),
+            )
+            conn.commit()
+        return self.get_context_pack_preset(preset_id)
+
+    def delete_context_pack_preset(self, *, preset_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM context_pack_presets WHERE preset_id = ?", (preset_id,))
+            conn.commit()
+        return cursor.rowcount > 0

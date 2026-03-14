@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, List
 
 from workspace_ai.adapters.base import MemoryAdapter
 from workspace_ai.workspace_import.chatgpt_importer import ChatGPTExportImporter
@@ -9,6 +9,7 @@ from workspace_ai.workspace_memory.context_service import ContextService
 from workspace_ai.workspace_memory.session_store import SessionStore
 from workspace_ai.workspace_runtime.chat_service import ChatService
 from workspace_ai.workspace_runtime.context_import_service import ContextImportService
+from workspace_ai.workspace_runtime.context_pack_preset_service import ContextPackPresetService
 from workspace_ai.workspace_runtime.debate_service import DebateService
 from workspace_ai.workspace_runtime.executor_service import ExecutorService
 from workspace_ai.workspace_runtime.handoff_service import HandoffService
@@ -28,6 +29,7 @@ class SessionManager:
         self.settings_service = SettingsService(store=self.store)
         self.debate_service = DebateService(store=self.store, settings_service=self.settings_service)
         self.context_import_service = ContextImportService(store=self.store)
+        self.context_pack_preset_service = ContextPackPresetService(store=self.store)
         self.executor_service = ExecutorService(store=self.store)
         self.handoff_service = HandoffService(store=self.store, settings_service=self.settings_service)
         self.mediation_service = MediationService(store=self.store)
@@ -199,6 +201,29 @@ class SessionManager:
 
     def delete_context_import(self, *, import_id: str) -> Dict[str, Any]:
         return self.context_import_service.delete(import_id=import_id)
+
+    # ── context pack presets ──────────────────────────────────────────────────
+
+    def create_context_pack_preset(self, *, project_id: str, name: str, import_ids: List[str]) -> Dict[str, Any]:
+        try:
+            return self.context_pack_preset_service.create(project_id=project_id, name=name, import_ids=import_ids)
+        except ValueError as exc:
+            return {"status": "error", "detail": str(exc)}
+
+    def list_context_pack_presets(self, *, project_id: str | None = None) -> Dict[str, Any]:
+        return self.context_pack_preset_service.list_presets(project_id=project_id)
+
+    def apply_context_pack_preset(self, *, preset_id: str, project_id: str) -> Dict[str, Any]:
+        return self.context_pack_preset_service.apply(preset_id=preset_id, project_id=project_id)
+
+    def update_context_pack_preset(self, *, preset_id: str, name: str | None = None, import_ids: List[str] | None = None) -> Dict[str, Any]:
+        try:
+            return self.context_pack_preset_service.update(preset_id=preset_id, name=name, import_ids=import_ids)
+        except ValueError as exc:
+            return {"status": "error", "detail": str(exc)}
+
+    def delete_context_pack_preset(self, *, preset_id: str) -> Dict[str, Any]:
+        return self.context_pack_preset_service.delete(preset_id=preset_id)
 
     # ── handoff ───────────────────────────────────────────────────────────────
 
