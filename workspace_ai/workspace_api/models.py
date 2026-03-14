@@ -34,6 +34,7 @@ class DebateCreateRequest(BaseModel):
     max_rounds: int = Field(default=5, ge=1, le=20)
     judge_provider: str | None = Field(default=None, pattern="^(openai|xai|anthropic)$")
     debate_style: str | None = Field(default=None, pattern="^(standard|fast|harsh_reviewer|side_by_side)$")
+    context_import_ids: List[str] = Field(default_factory=list)
 
 
 class ExecutionCreateRequest(BaseModel):
@@ -41,6 +42,7 @@ class ExecutionCreateRequest(BaseModel):
     debate_id: str | None = Field(default=None)
     plan: str = Field(default="", max_length=12000)
     execution_mode: str = Field(default="read_only_v1", pattern="^(read_only_v1|change_plan_v1)$")
+    context_import_ids: List[str] = Field(default_factory=list)
 
 
 class ExecutionApprovalRequest(BaseModel):

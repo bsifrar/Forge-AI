@@ -54,15 +54,23 @@ class SessionManager:
             context["imported_context"] = ""
         return context
 
-    def context_preview(self, *, project_id: str) -> Dict[str, Any]:
+    def context_preview(self, *, project_id: str, context_import_ids: list[str] | None = None) -> Dict[str, Any]:
         s = self.settings_service.get()
         chat_role = self._chat_role()
-        stub_context = self._inject_preferences({
+        if context_import_ids:
+            imported_block = self.context_import_service.build_context_block_for_ids(project_id=project_id, import_ids=context_import_ids)
+            active_import_ids = list(context_import_ids)
+        else:
+            imported_block = self.context_import_service.build_context_block(project_id=project_id)
+            active_import_ids = [item["import_id"] for item in self.store.list_enabled_context_imports(project_id=project_id)]
+        stub_context = {
             "memory_context": {"summary": "[retrieved memory would appear here]"},
             "checkpoints": [],
-        }, project_id=project_id)
+            "personal_preferences": str(s.get("personal_preferences") or "").strip(),
+            "project_instructions": str(s.get("project_instructions") or "").strip(),
+            "imported_context": imported_block,
+        }
         system_prompt = self.chat_service._system_prompt(project_id=project_id, context=stub_context)
-        enabled_imports = self.store.list_enabled_context_imports(project_id=project_id)
         return {
             "status": "ok",
             "project_id": project_id,
@@ -70,7 +78,8 @@ class SessionManager:
             "debate_style": s.get("debate_style", "standard"),
             "personal_preferences": stub_context["personal_preferences"],
             "project_instructions": stub_context["project_instructions"],
-            "imported_context_count": len(enabled_imports),
+            "imported_context_count": len(active_import_ids),
+            "active_import_ids": active_import_ids,
             "system_prompt": system_prompt,
         }
 
@@ -89,12 +98,13 @@ class SessionManager:
     def get_execution(self, *, execution_id: str) -> Dict[str, Any]:
         return self.executor_service.get_execution(execution_id=execution_id)
 
-    def create_execution(self, *, project_id: str, debate_id: str | None = None, plan: str = "", execution_mode: str = "read_only_v1") -> Dict[str, Any]:
+    def create_execution(self, *, project_id: str, debate_id: str | None = None, plan: str = "", execution_mode: str = "read_only_v1", context_import_ids: list[str] | None = None) -> Dict[str, Any]:
         result = self.executor_service.create_execution(
             project_id=project_id,
             debate_id=debate_id,
             plan=plan,
             execution_mode=execution_mode,
+            context_import_ids=context_import_ids or None,
         )
         execution = result.get("execution")
         if isinstance(execution, dict):
@@ -127,6 +137,7 @@ class SessionManager:
         max_rounds: int = 5,
         judge_provider: str | None = None,
         debate_style: str | None = None,
+        context_import_ids: list[str] | None = None,
     ) -> Dict[str, Any]:
         result = self.debate_service.start_debate(
             project_id=project_id,
@@ -137,6 +148,7 @@ class SessionManager:
             max_rounds=max_rounds,
             judge_provider=judge_provider,
             debate_style=debate_style,
+            context_import_ids=context_import_ids or None,
         )
         debate = result.get("debate")
         if isinstance(debate, dict):

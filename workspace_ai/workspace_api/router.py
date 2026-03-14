@@ -24,8 +24,9 @@ def build_router(manager: SessionManager) -> APIRouter:
         return manager.settings()
 
     @router.get("/context/preview")
-    def context_preview(project_id: str = "workspace") -> dict:
-        return manager.context_preview(project_id=project_id)
+    def context_preview(project_id: str = "workspace", import_ids: str = "") -> dict:
+        ids = [i.strip() for i in import_ids.split(",") if i.strip()] if import_ids else None
+        return manager.context_preview(project_id=project_id, context_import_ids=ids or None)
 
     @router.post("/context-imports")
     def create_context_import(request: ContextImportCreateRequest) -> dict:
@@ -86,6 +87,7 @@ def build_router(manager: SessionManager) -> APIRouter:
                 max_rounds=request.max_rounds,
                 judge_provider=request.judge_provider,
                 debate_style=request.debate_style,
+                context_import_ids=request.context_import_ids or None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -109,6 +111,7 @@ def build_router(manager: SessionManager) -> APIRouter:
                 debate_id=request.debate_id,
                 plan=request.plan,
                 execution_mode=request.execution_mode,
+                context_import_ids=request.context_import_ids or None,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

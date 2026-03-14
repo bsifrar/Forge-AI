@@ -7,6 +7,7 @@ from workspace_ai.providers import get_provider
 from workspace_ai.workspace_runtime.artifact_service import ArtifactService
 from workspace_ai.workspace_memory.session_store import SessionStore
 from workspace_ai.workspace_runtime.chat_service import ChatService
+from workspace_ai.workspace_runtime.context_import_service import ContextImportService
 from workspace_ai.workspace_runtime.settings_service import SettingsService
 
 
@@ -35,6 +36,7 @@ class DebateService:
         self.settings_service = settings_service
         self.max_rounds = max(1, int(max_rounds))
         self.artifact_service = ArtifactService()
+        self.context_import_service = ContextImportService(store=store)
 
     @staticmethod
     def _normalize_provider(value: str | None, *, field_name: str) -> str:
@@ -71,6 +73,7 @@ class DebateService:
         max_rounds: int = 5,
         judge_provider: str | None = None,
         debate_style: str | None = None,
+        context_import_ids: List[str] | None = None,
     ) -> Dict[str, Any]:
         active_participants = self._normalize_participants(participants)
         bounded_rounds = max(1, min(20, int(max_rounds)))
@@ -78,6 +81,7 @@ class DebateService:
         normalized_judge = self._normalize_provider(judge_provider or default_judge_provider, field_name="judge_provider")
         normalized_files = self.artifact_service.normalize_inputs(files)
         resolved_style = self._resolve_style(debate_style)
+        resolved_import_ids = self._resolve_context_import_ids(project_id=project_id, import_ids=context_import_ids)
         debate = self.store.create_debate(
             project_id=project_id,
             topic=topic,
@@ -87,8 +91,16 @@ class DebateService:
             max_rounds=bounded_rounds,
             judge_provider=normalized_judge,
             debate_style=resolved_style,
+            context_import_ids=resolved_import_ids,
         )
         return self.run_debate(debate_id=str(debate["debate_id"]), max_rounds=int(debate.get("max_rounds") or max_rounds))
+
+    def _resolve_context_import_ids(self, *, project_id: str, import_ids: List[str] | None) -> List[str]:
+        if not import_ids:
+            return []
+        # validate each ID belongs to this project; raises ValueError on failure
+        self.context_import_service.resolve_import_ids(project_id=project_id, import_ids=import_ids)
+        return list(import_ids)
 
     def _resolve_style(self, style: str | None) -> str:
         candidate = str(style or "").strip().lower()
@@ -197,7 +209,7 @@ class DebateService:
         bottlenecks = str(debate.get("bottlenecks") or "").strip() or "[none]"
         return f"Debate topic: {debate.get('topic', '')}\nBottlenecks: {bottlenecks}\nFiles: {file_labels}"
 
-    def _instruction_context(self, *, project_id: str = "") -> str:
+    def _instruction_context(self, *, project_id: str = "", import_ids: List[str] | None = None) -> str:
         s = self.settings_service.get()
         preferences = str(s.get("personal_preferences") or "").strip()
         instructions = str(s.get("project_instructions") or "").strip()
@@ -207,15 +219,12 @@ class DebateService:
         if instructions:
             parts.append(f"Project instructions: {instructions}")
         if project_id:
-            imported = self.settings_service.store.list_enabled_context_imports(project_id=project_id)
-            if imported:
-                from workspace_ai.workspace_runtime.context_import_service import ContextImportService, _CATEGORY_LABEL
-                lines = ["Imported context:"]
-                for item in imported:
-                    label = _CATEGORY_LABEL.get(item["category"], item["category"])
-                    source = item["source_label"] or item["import_id"]
-                    lines.append(f"[{label} — {source}]\n{item['content'].strip()}")
-                parts.append("\n\n".join(lines))
+            if import_ids:
+                imported_block = self.context_import_service.build_context_block_for_ids(project_id=project_id, import_ids=import_ids)
+            else:
+                imported_block = self.context_import_service.build_context_block(project_id=project_id)
+            if imported_block:
+                parts.append(imported_block)
         return ("\n".join(parts) + "\n") if parts else ""
 
     def _participant_prompt(self, *, debate: Dict[str, Any], history: List[Dict[str, str]], round_index: int) -> str:
@@ -224,7 +233,8 @@ class DebateService:
         style = str(debate.get("debate_style") or "standard").strip().lower()
         style_instruction = _STYLE_CONFIGS.get(style, "")
         style_line = f"Style instruction: {style_instruction}\n" if style_instruction else ""
-        instr_context = self._instruction_context(project_id=str(debate.get("project_id") or ""))
+        override_ids = debate.get("context_import_ids") if isinstance(debate.get("context_import_ids"), list) else []
+        instr_context = self._instruction_context(project_id=str(debate.get("project_id") or ""), import_ids=override_ids or None)
         return (
             f"Round {round_index} debate.\n"
             f"Topic: {debate.get('topic', '')}\n"
@@ -259,7 +269,7 @@ class DebateService:
                 prompt=(
                     f"Summarize the engineering plan for this debate topic: {debate.get('topic', '')}.\n"
                     "Use the structured round data below. Do not invent new requirements.\n\n"
-                    f"{self._instruction_context(project_id=str(debate.get('project_id') or ''))}"
+                    f"{self._instruction_context(project_id=str(debate.get('project_id') or ''), import_ids=debate.get('context_import_ids') or None)}"
                     f"Structured rounds JSON:\n{json.dumps(structured_rounds, ensure_ascii=True)}\n\n"
                     "Return valid JSON only with this exact shape:\n"
                     '{'

@@ -45,9 +45,21 @@ class ContextImportService:
         deleted = self.store.delete_context_import(import_id=import_id)
         return {"status": "ok" if deleted else "not_found", "import_id": import_id}
 
-    def build_context_block(self, *, project_id: str) -> str:
-        """Return a labelled text block of all enabled imports for injection into prompts."""
-        items = self.store.list_enabled_context_imports(project_id=project_id)
+    def resolve_import_ids(self, *, project_id: str, import_ids: List[str]) -> List[Dict[str, Any]]:
+        """Validate that all import_ids exist and belong to project_id. Raises ValueError on any mismatch."""
+        if not import_ids:
+            return []
+        items = []
+        for import_id in import_ids:
+            item = self.store.get_context_import(import_id)
+            if item is None:
+                raise ValueError(f"context import not found: {import_id}")
+            if item["project_id"] != project_id:
+                raise ValueError(f"context import {import_id} does not belong to project {project_id}")
+            items.append(item)
+        return items
+
+    def _assemble_block(self, items: List[Dict[str, Any]]) -> str:
         if not items:
             return ""
         lines: List[str] = ["Imported context:"]
@@ -56,3 +68,13 @@ class ContextImportService:
             source = item["source_label"] or item["import_id"]
             lines.append(f"[{label} — {source}]\n{item['content'].strip()}")
         return "\n\n".join(lines)
+
+    def build_context_block(self, *, project_id: str) -> str:
+        """Return a labelled text block of all enabled imports (project defaults)."""
+        items = self.store.list_enabled_context_imports(project_id=project_id)
+        return self._assemble_block(items)
+
+    def build_context_block_for_ids(self, *, project_id: str, import_ids: List[str]) -> str:
+        """Return a labelled text block for a specific override list of import IDs."""
+        items = self.resolve_import_ids(project_id=project_id, import_ids=import_ids)
+        return self._assemble_block(items)

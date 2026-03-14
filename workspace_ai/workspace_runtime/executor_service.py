@@ -4,6 +4,7 @@ import re
 from typing import Any, Dict, List
 
 from workspace_ai.workspace_memory.session_store import SessionStore
+from workspace_ai.workspace_runtime.context_import_service import ContextImportService
 
 
 class ExecutorService:
@@ -11,6 +12,7 @@ class ExecutorService:
 
     def __init__(self, *, store: SessionStore) -> None:
         self.store = store
+        self.context_import_service = ContextImportService(store=store)
 
     def list_executions(self, *, project_id: str | None = None, limit: int = 50) -> Dict[str, Any]:
         rows = self.store.list_executions(project_id=project_id, limit=limit)
@@ -29,19 +31,34 @@ class ExecutorService:
         debate_id: str | None = None,
         plan: str = "",
         execution_mode: str = "read_only_v1",
+        context_import_ids: List[str] | None = None,
     ) -> Dict[str, Any]:
         normalized_plan = str(plan or "").strip()
         normalized_debate_id = str(debate_id or "").strip()
         normalized_mode = self._normalize_mode(execution_mode)
+        resolved_import_ids = self._resolve_context_import_ids(project_id=project_id, import_ids=context_import_ids)
         source_plan = self._source_plan(project_id=project_id, debate_id=normalized_debate_id, plan=normalized_plan)
-        proposal = self._build_proposal(source_plan=source_plan, execution_mode=normalized_mode)
+        imported_context = self._build_imported_context(project_id=project_id, import_ids=resolved_import_ids)
+        proposal = self._build_proposal(source_plan=source_plan, execution_mode=normalized_mode, imported_context=imported_context)
         execution = self.store.create_execution(
             project_id=project_id,
             debate_id=normalized_debate_id,
             source_plan=source_plan,
             proposal=proposal,
+            context_import_ids=resolved_import_ids,
         )
         return {"status": "ok", "execution": execution}
+
+    def _resolve_context_import_ids(self, *, project_id: str, import_ids: List[str] | None) -> List[str]:
+        if not import_ids:
+            return []
+        self.context_import_service.resolve_import_ids(project_id=project_id, import_ids=import_ids)
+        return list(import_ids)
+
+    def _build_imported_context(self, *, project_id: str, import_ids: List[str]) -> str:
+        if import_ids:
+            return self.context_import_service.build_context_block_for_ids(project_id=project_id, import_ids=import_ids)
+        return self.context_import_service.build_context_block(project_id=project_id)
 
     def decide_execution(self, *, execution_id: str, approved: bool, note: str = "") -> Dict[str, Any]:
         execution = self.store.get_execution(execution_id)
@@ -111,7 +128,7 @@ class ExecutorService:
             "artifacts": [],
         }
 
-    def _build_proposal(self, *, source_plan: Dict[str, Any], execution_mode: str) -> Dict[str, Any]:
+    def _build_proposal(self, *, source_plan: Dict[str, Any], execution_mode: str, imported_context: str = "") -> Dict[str, Any]:
         plan_text = str(source_plan.get("content") or "").strip()
         steps = self._extract_steps(plan_text)
         summary = steps[0]["summary"] if steps else (plan_text[:240] or "No plan summary available.")
@@ -120,6 +137,7 @@ class ExecutorService:
             "mode": execution_mode,
             "summary": summary,
             "artifact_summary": self._artifact_summary(artifacts),
+            "imported_context": imported_context,
             "requires_approval": True,
             "action_type": "review" if execution_mode == "read_only_v1" else "change_plan",
             "steps": steps,

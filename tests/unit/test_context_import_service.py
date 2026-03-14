@@ -103,3 +103,49 @@ def test_invalid_category_raises(isolated_workspace_env):
         store.create_context_import(
             project_id="proj1", source_label="bad", content="x", category="unknown_cat"
         )
+
+
+def test_resolve_import_ids_valid(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = ContextImportService(store=store)
+
+    item = svc.create(project_id="proj1", source_label="Note", content="content here", category="reference")
+    resolved = svc.resolve_import_ids(project_id="proj1", import_ids=[item["import_id"]])
+    assert len(resolved) == 1
+    assert resolved[0]["import_id"] == item["import_id"]
+
+
+def test_resolve_import_ids_wrong_project_raises(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = ContextImportService(store=store)
+
+    item = svc.create(project_id="proj1", source_label="Note", content="content here", category="reference")
+    with pytest.raises(ValueError, match="does not belong to project"):
+        svc.resolve_import_ids(project_id="proj2", import_ids=[item["import_id"]])
+
+
+def test_resolve_import_ids_missing_raises(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = ContextImportService(store=store)
+    with pytest.raises(ValueError, match="not found"):
+        svc.resolve_import_ids(project_id="proj1", import_ids=["ctximp_doesnotexist"])
+
+
+def test_build_context_block_for_ids(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = ContextImportService(store=store)
+
+    item1 = svc.create(project_id="proj1", source_label="Alpha", content="alpha content", category="reference")
+    item2 = svc.create(project_id="proj1", source_label="Beta", content="beta content", category="transient")
+    # disable item2 — but override should still include it if explicitly selected
+    svc.set_enabled(import_id=item2["import_id"], enabled=False)
+
+    block = svc.build_context_block_for_ids(project_id="proj1", import_ids=[item2["import_id"]])
+    assert "beta content" in block
+    assert "alpha content" not in block
+
+
+def test_build_context_block_for_ids_empty_returns_empty(isolated_workspace_env):
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    svc = ContextImportService(store=store)
+    assert svc.build_context_block_for_ids(project_id="proj1", import_ids=[]) == ""

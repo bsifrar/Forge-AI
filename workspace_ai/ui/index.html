@@ -670,6 +670,8 @@
               <option value="harsh_reviewer">Harsh Reviewer — hint: 5 rounds</option>
               <option value="side_by_side">Side by Side — hint: 3 rounds</option>
             </select>
+            <div class="field-label">Context Pack <span class="muted" style="font-size:0.8em;">leave empty to use project defaults (enabled imports)</span></div>
+            <div id="debateContextPackList" style="max-height:120px; overflow-y:auto; border:1px solid var(--border,#333); border-radius:4px; padding:6px;" class="muted">No imported context items. Add some in Settings → Imported Context.</div>
             <button id="startDebateBtn" onclick="startDebate()">Start Debate</button>
           </div>
           <p id="debateStatus" class="help-text" style="margin-top:10px;">Start a bounded multi-provider debate from here.</p>
@@ -1316,6 +1318,7 @@
             ${esc(debate.project_id || "forge")} · ${esc(debate.debate_id || "")} · ${esc(debate.status || "unknown")}${debate.debate_style && debate.debate_style !== "standard" ? ` · <span class="pill">${esc(debate.debate_style)}</span>` : ""}
           </div>
           <div class="help-text">Participants: ${esc((debate.participants || []).map(item => `${item.provider || "unknown"} (${item.model || "default"})`).join(", ") || "none")}</div>
+          ${(debate.context_import_ids || []).length ? `<div class="help-text">Context pack: ${(debate.context_import_ids || []).length} import(s) selected</div>` : ""}
           <div class="help-text">Rounds: ${esc((debate.rounds || []).length)} / ${esc(debate.max_rounds || 5)}</div>
           ${(debate.bottlenecks || "").trim() ? `<div class="help-text" style="margin-top:8px;"><strong>Bottlenecks</strong>: ${esc(debate.bottlenecks)}</div>` : ""}
           ${renderDebateArtifacts(debate.files || [])}
@@ -1779,7 +1782,7 @@
         const lines = [
           `Chat role: ${data.chat_role?.provider || "?"} / ${data.chat_role?.model || "?"}`,
           `Debate style: ${data.debate_style || "standard"}`,
-          `Imported context items (enabled): ${data.imported_context_count ?? 0}`,
+          `Imported context items (active): ${data.imported_context_count ?? 0}${data.active_import_ids?.length ? ` [${data.active_import_ids.join(", ")}]` : ""}`,
           ``,
           `── System prompt ──────────────────────────────────────────`,
           data.system_prompt || "[empty]",
@@ -1790,6 +1793,27 @@
       }
     }
 
+    function renderDebateContextPack() {
+      const el = document.getElementById("debateContextPackList");
+      if (!el) return;
+      const projectId = document.getElementById("debateProjectId")?.value.trim() || "forge";
+      const imports = (state.contextImports || []).filter(item => item.project_id === projectId);
+      if (!imports.length) {
+        el.innerHTML = `<span class="muted" style="font-size:0.85em;">No imported context for project "${projectId}". Add some in Settings → Imported Context.</span>`;
+        return;
+      }
+      el.innerHTML = imports.map(item => `
+        <label style="display:flex; align-items:flex-start; gap:6px; margin-bottom:4px; cursor:pointer; font-size:0.85em;">
+          <input type="checkbox" class="debate-context-pack-cb" value="${esc(item.import_id)}" ${item.enabled ? "checked" : ""} style="margin-top:2px;" />
+          <span>
+            <strong>${esc(item.source_label || item.import_id)}</strong>
+            <span class="pill" style="margin-left:4px;">${esc(item.category)}</span>
+            ${!item.enabled ? '<span class="muted" style="font-size:0.8em;">(disabled by default)</span>' : ""}
+          </span>
+        </label>
+      `).join("");
+    }
+
     async function loadContextImports() {
       const projectId = document.getElementById("projectId")?.value.trim() || "workspace";
       const countEl = document.getElementById("contextImportCount");
@@ -1797,7 +1821,9 @@
       try {
         const data = await api(`/workspace/context-imports?project_id=${encodeURIComponent(projectId)}&limit=200`);
         const items = data.imports || [];
+        state.contextImports = (state.contextImports || []).filter(i => i.project_id !== projectId).concat(items);
         if (countEl) countEl.textContent = items.length;
+        renderDebateContextPack();
         if (!listEl) return;
         if (!items.length) {
           listEl.innerHTML = `<div class="muted">No imported context yet.</div>`;
@@ -1950,6 +1976,7 @@
             debate_id: debateId,
             plan: "",
             execution_mode: executionMode,
+            context_import_ids: Array.isArray(debate.context_import_ids) ? debate.context_import_ids : [],
           }),
         });
         document.getElementById("debateStatus").textContent = `Execution proposal created for ${debateId} in ${executionMode}.`;
@@ -2245,6 +2272,7 @@
       const participants = Array.from(participantSelect.selectedOptions).map(option => JSON.parse(option.value));
       const judgeProvider = document.getElementById("debateJudge").value;
       const debateStyleOverride = document.getElementById("debateStyleOverride")?.value || null;
+      const contextPackChecked = Array.from(document.querySelectorAll(".debate-context-pack-cb:checked")).map(cb => cb.value);
       const statusEl = document.getElementById("debateStatus");
 
       if (!topic) {
@@ -2274,6 +2302,7 @@
             max_rounds: maxRounds,
             judge_provider: judgeProvider,
             debate_style: debateStyleOverride || null,
+            context_import_ids: contextPackChecked,
           }),
         });
         localStorage.setItem(

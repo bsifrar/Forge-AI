@@ -134,6 +134,14 @@ class SessionStore:
                 conn.execute("ALTER TABLE debates ADD COLUMN max_rounds INTEGER NOT NULL DEFAULT 5")
             if "debate_style" not in debate_columns:
                 conn.execute("ALTER TABLE debates ADD COLUMN debate_style TEXT NOT NULL DEFAULT 'standard'")
+            if "context_import_ids_json" not in debate_columns:
+                conn.execute("ALTER TABLE debates ADD COLUMN context_import_ids_json TEXT NOT NULL DEFAULT '[]'")
+            execution_columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(executions)").fetchall()
+            }
+            if "context_import_ids_json" not in execution_columns:
+                conn.execute("ALTER TABLE executions ADD COLUMN context_import_ids_json TEXT NOT NULL DEFAULT '[]'")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS context_imports (
@@ -332,6 +340,7 @@ class SessionStore:
         max_rounds: int,
         judge_provider: str,
         debate_style: str = "standard",
+        context_import_ids: List[str] | None = None,
     ) -> Dict[str, Any]:
         debate_id = f"deb_{uuid.uuid4().hex[:12]}"
         now = self._now_iso()
@@ -340,9 +349,9 @@ class SessionStore:
                 """
                 INSERT INTO debates(
                     debate_id, project_id, topic, bottlenecks, files_json, participants_json, max_rounds,
-                    judge_provider, debate_style, final_plan_json, status, created_at, updated_at
+                    judge_provider, debate_style, context_import_ids_json, final_plan_json, status, created_at, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'pending', ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'pending', ?, ?)
                 """,
                 (
                     debate_id,
@@ -354,6 +363,7 @@ class SessionStore:
                     int(max_rounds),
                     judge_provider,
                     debate_style,
+                    self._json(context_import_ids or []),
                     now,
                     now,
                 ),
@@ -435,6 +445,7 @@ class SessionStore:
         parsed["participants"] = json.loads(parsed.pop("participants_json", "[]"))
         parsed["max_rounds"] = int(parsed.get("max_rounds") or 5)
         parsed["final_plan"] = json.loads(parsed.pop("final_plan_json", "{}"))
+        parsed["context_import_ids"] = json.loads(parsed.pop("context_import_ids_json", "[]"))
         parsed["rounds"] = self.list_debate_rounds(debate_id=debate_id)
         return parsed
 
@@ -492,6 +503,7 @@ class SessionStore:
         debate_id: str,
         source_plan: Dict[str, Any],
         proposal: Dict[str, Any],
+        context_import_ids: List[str] | None = None,
     ) -> Dict[str, Any]:
         execution_id = f"exe_{uuid.uuid4().hex[:12]}"
         now = self._now_iso()
@@ -500,9 +512,9 @@ class SessionStore:
                 """
                 INSERT INTO executions(
                     execution_id, project_id, debate_id, source_plan_json, proposal_json, execution_json,
-                    approval_note, status, created_at, updated_at
+                    approval_note, context_import_ids_json, status, created_at, updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, '{}', '', 'pending_approval', ?, ?)
+                VALUES(?, ?, ?, ?, ?, '{}', '', ?, 'pending_approval', ?, ?)
                 """,
                 (
                     execution_id,
@@ -510,6 +522,7 @@ class SessionStore:
                     debate_id,
                     self._json(source_plan),
                     self._json(proposal),
+                    self._json(context_import_ids or []),
                     now,
                     now,
                 ),
@@ -556,6 +569,7 @@ class SessionStore:
         parsed["source_plan"] = json.loads(parsed.pop("source_plan_json", "{}"))
         parsed["proposal"] = json.loads(parsed.pop("proposal_json", "{}"))
         parsed["execution"] = json.loads(parsed.pop("execution_json", "{}"))
+        parsed["context_import_ids"] = json.loads(parsed.pop("context_import_ids_json", "[]"))
         return parsed
 
     def list_executions(self, *, project_id: str | None = None, limit: int = 50) -> List[Dict[str, Any]]:

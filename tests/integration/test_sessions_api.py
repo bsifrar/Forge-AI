@@ -463,3 +463,95 @@ def test_context_preview_includes_import_count(monkeypatch, isolated_workspace_e
     data = preview.json()
     assert data["imported_context_count"] == 1
     assert "Monorepo. No ORM." in data["system_prompt"]
+
+
+def test_debate_stores_context_import_ids_override(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    # create two imports
+    r1 = client.post("/workspace/context-imports", json={
+        "project_id": "forge", "source_label": "Doc A", "content": "Doc A content.", "category": "reference",
+    })
+    r2 = client.post("/workspace/context-imports", json={
+        "project_id": "forge", "source_label": "Doc B", "content": "Doc B content.", "category": "reference",
+    })
+    id1 = r1.json()["import"]["import_id"]
+    id2 = r2.json()["import"]["import_id"]
+
+    # start debate with override selecting only id1
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Context pack override test",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "context_import_ids": [id1],
+    })
+    assert debate_resp.status_code == 200
+    debate = debate_resp.json()["debate"]
+    assert debate["context_import_ids"] == [id1]
+
+
+def test_debate_context_import_ids_invalid_raises_422(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Bad import id test",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "context_import_ids": ["ctximp_doesnotexist"],
+    })
+    assert debate_resp.status_code == 422
+
+
+def test_execution_inherits_context_import_ids_from_debate(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    r1 = client.post("/workspace/context-imports", json={
+        "project_id": "forge", "source_label": "Spec", "content": "Use hexagonal arch.", "category": "project_background",
+    })
+    import_id = r1.json()["import"]["import_id"]
+
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Execution context pack test",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "context_import_ids": [import_id],
+    })
+    debate_id = debate_resp.json()["debate"]["debate_id"]
+
+    exec_resp = client.post("/workspace/executions", json={
+        "project_id": "forge",
+        "debate_id": debate_id,
+        "execution_mode": "read_only_v1",
+        "context_import_ids": [import_id],
+    })
+    assert exec_resp.status_code == 200
+    execution = exec_resp.json()["execution"]
+    assert execution["context_import_ids"] == [import_id]
+    assert "Use hexagonal arch." in execution["proposal"].get("imported_context", "")
+
+
+def test_context_preview_override_import_ids(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    r1 = client.post("/workspace/context-imports", json={
+        "project_id": "workspace", "source_label": "Selected", "content": "selected content only.", "category": "reference",
+    })
+    r2 = client.post("/workspace/context-imports", json={
+        "project_id": "workspace", "source_label": "Excluded", "content": "excluded content.", "category": "reference",
+    })
+    id1 = r1.json()["import"]["import_id"]
+
+    preview = client.get("/workspace/context/preview", params={"project_id": "workspace", "import_ids": id1})
+    assert preview.status_code == 200
+    data = preview.json()
+    assert "selected content only." in data["system_prompt"]
+    assert "excluded content." not in data["system_prompt"]
+    assert data["active_import_ids"] == [id1]
