@@ -1339,6 +1339,7 @@
           <div class="debate-actions">
             <button class="secondary" onclick='copyDebatePlan(decodeURIComponent(${JSON.stringify(encodeURIComponent((debate.final_plan || {}).content || ""))}))'>Copy Plan</button>
             <button class="secondary" onclick='copyFullDebate(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(debate || {})))})))'>Copy Full Debate</button>
+            <button class="secondary" onclick="copyHandoff('${esc(debate.debate_id || "")}', null)">Copy Handoff</button>
           </div>
         </div>
       `).join("");
@@ -1517,6 +1518,7 @@
             `}
             <button class="secondary" onclick='copyExecutionPayload(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(execution || {})))})))'>Copy Execution</button>
             ${executionContent ? `<button class="secondary" onclick='copyExecutionResult(decodeURIComponent(${JSON.stringify(encodeURIComponent(executionContent))}))'>Copy Result</button>` : ""}
+            <button class="secondary" onclick="copyHandoff(null, '${esc(execution.execution_id || "")}')">Copy Handoff</button>
           </div>
         </div>
       `;
@@ -1536,6 +1538,22 @@
 
     async function copyExecutionResult(content) {
       await copyText(String(content || ""), "Execution result copied.");
+    }
+
+    async function copyHandoff(debateId, executionId) {
+      const params = new URLSearchParams();
+      if (executionId) params.set("execution_id", executionId);
+      else if (debateId) params.set("debate_id", debateId);
+      else return;
+      try {
+        const resp = await fetch(`/workspace/handoff?${params}`);
+        if (!resp.ok) { showToast(`Handoff fetch failed: ${resp.status}`, "error"); return; }
+        const data = await resp.json();
+        const text = (data.handoff || {}).text || JSON.stringify(data, null, 2);
+        await copyText(text, "Handoff package copied.");
+      } catch (err) {
+        showToast(`Handoff error: ${err.message}`, "error");
+      }
     }
 
     function renderMessages(messages = []) {

@@ -11,6 +11,7 @@ from workspace_ai.workspace_runtime.chat_service import ChatService
 from workspace_ai.workspace_runtime.context_import_service import ContextImportService
 from workspace_ai.workspace_runtime.debate_service import DebateService
 from workspace_ai.workspace_runtime.executor_service import ExecutorService
+from workspace_ai.workspace_runtime.handoff_service import HandoffService
 from workspace_ai.workspace_runtime.policy_service import PolicyService
 from workspace_ai.workspace_runtime.settings_service import SettingsService
 from workspace_ai.workspace_runtime.stream_manager import StreamManager
@@ -27,6 +28,7 @@ class SessionManager:
         self.debate_service = DebateService(store=self.store, settings_service=self.settings_service)
         self.context_import_service = ContextImportService(store=self.store)
         self.executor_service = ExecutorService(store=self.store)
+        self.handoff_service = HandoffService(store=self.store, settings_service=self.settings_service)
         self.policy_service = PolicyService(store=self.store, settings_service=self.settings_service)
         self.importer = ChatGPTExportImporter(store=self.store, adapter=self.adapter)
 
@@ -195,6 +197,15 @@ class SessionManager:
 
     def delete_context_import(self, *, import_id: str) -> Dict[str, Any]:
         return self.context_import_service.delete(import_id=import_id)
+
+    # ── handoff ───────────────────────────────────────────────────────────────
+
+    def build_handoff(self, *, debate_id: str | None = None, execution_id: str | None = None) -> Dict[str, Any]:
+        if execution_id:
+            return self.handoff_service.build_from_execution(execution_id=execution_id)
+        if debate_id:
+            return self.handoff_service.build_from_debate(debate_id=debate_id)
+        return {"status": "error", "detail": "debate_id or execution_id required"}
 
     def search_sessions(self, *, query: str, project_id: str | None = None, limit: int = 25) -> Dict[str, Any]:
         rows = self.store.search_sessions(query=query, project_id=project_id, limit=limit)

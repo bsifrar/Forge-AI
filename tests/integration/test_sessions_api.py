@@ -555,3 +555,90 @@ def test_context_preview_override_import_ids(monkeypatch, isolated_workspace_env
     assert "selected content only." in data["system_prompt"]
     assert "excluded content." not in data["system_prompt"]
     assert data["active_import_ids"] == [id1]
+
+
+def test_handoff_missing_params_is_422(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    resp = client.get("/workspace/handoff")
+    assert resp.status_code == 422
+
+
+def test_handoff_debate_not_found_is_404(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    resp = client.get("/workspace/handoff", params={"debate_id": "deb_missing"})
+    assert resp.status_code == 404
+
+
+def test_handoff_execution_not_found_is_404(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    resp = client.get("/workspace/handoff", params={"execution_id": "exe_missing"})
+    assert resp.status_code == 404
+
+
+def test_handoff_from_debate(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Handoff debate topic",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+    })
+    assert debate_resp.status_code == 200
+    debate_id = debate_resp.json()["debate"]["debate_id"]
+
+    resp = client.get("/workspace/handoff", params={"debate_id": debate_id})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    h = data["handoff"]
+    assert h["debate_id"] == debate_id
+    assert h["execution_id"] is None
+    assert h["topic"] == "Handoff debate topic"
+    assert "FORGE HANDOFF PACKAGE" in h["text"]
+    assert "Handoff debate topic" in h["text"]
+    assert "RECOMMENDED NEXT ACTION" in h["text"]
+
+
+def test_handoff_from_execution(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Handoff execution topic",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+    })
+    debate_id = debate_resp.json()["debate"]["debate_id"]
+
+    exec_resp = client.post("/workspace/executions", json={
+        "project_id": "forge",
+        "debate_id": debate_id,
+        "plan": "Execute the plan.",
+        "execution_mode": "read_only_v1",
+    })
+    assert exec_resp.status_code == 200
+    execution_id = exec_resp.json()["execution"]["execution_id"]
+
+    resp = client.get("/workspace/handoff", params={"execution_id": execution_id})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    h = data["handoff"]
+    assert h["execution_id"] == execution_id
+    assert h["execution_mode"] == "read_only_v1"
+    assert "FORGE HANDOFF PACKAGE" in h["text"]
+    assert "RECOMMENDED NEXT ACTION" in h["text"]

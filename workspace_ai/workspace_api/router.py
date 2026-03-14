@@ -55,6 +55,15 @@ def build_router(manager: SessionManager) -> APIRouter:
     def delete_context_import(import_id: str) -> dict:
         return manager.delete_context_import(import_id=import_id)
 
+    @router.get("/handoff")
+    def get_handoff(debate_id: str | None = None, execution_id: str | None = None) -> dict:
+        if not debate_id and not execution_id:
+            raise HTTPException(status_code=422, detail="debate_id or execution_id required")
+        result = manager.build_handoff(debate_id=debate_id, execution_id=execution_id)
+        if result.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=result.get("debate_id") or result.get("execution_id") or "not found")
+        return result
+
     @router.post("/settings")
     def update_settings(request: SettingsUpdateRequest) -> dict:
         return manager.update_settings(request.model_dump())
