@@ -1944,15 +1944,15 @@
             </div>
           </details>
           ${renderDebateExecution(debate)}
-          <div class="debate-section">
-            <h4>Rounds</h4>
+          <details class="debate-section">
+            <summary>Rounds (${(debate.rounds || []).length} / ${esc(debate.max_rounds || 5)})</summary>
             ${(debate.rounds || []).map(round => `
               <div class="context-item" style="margin-top:8px;">
                 <div class="type">Round ${esc(round.round_index)} · ${esc(round.participant_provider || "unknown")} · ${esc(round.participant_model || "default")}</div>
                 ${renderStructuredRound(round.response || {})}
               </div>
             `).join("") || `<div class="muted">No rounds recorded.</div>`}
-          </div>
+          </details>
           <div class="debate-actions">
             ${renderNextActionBtn(debateNextAction(debate), debate.debate_id || "")}
             <button class="secondary" onclick='copyDebatePlan(decodeURIComponent(${JSON.stringify(encodeURIComponent((debate.final_plan || {}).content || ""))}))'>Copy Plan</button>
