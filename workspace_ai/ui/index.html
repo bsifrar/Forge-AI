@@ -2220,6 +2220,16 @@
         <div class="debate-section">
           <h4>Execution</h4>
           ${renderExecutionStatusBand(execution, outcomeSummary)}
+          ${execution.status === "pending_approval" ? `
+            <div class="debate-actions" style="margin-top:6px; padding-bottom:8px; border-bottom:1px solid var(--border);">
+              <button ${pending ? "disabled" : ""} onclick="approveExecution('${esc(execution.execution_id || "")}', '${esc(debate.debate_id || "")}')">
+                ${pending ? "Working..." : "Approve"}
+              </button>
+              <button class="secondary" ${pending ? "disabled" : ""} onclick="rejectExecution('${esc(execution.execution_id || "")}', '${esc(debate.debate_id || "")}')">
+                ${pending ? "Working..." : "Reject"}
+              </button>
+            </div>
+          ` : ""}
           ${renderExecutionOutcome(execution, outcomeSummary)}
           <div class="help-text">Mode: ${esc(proposal.mode || result.mode || "unknown")}${proposal.context_source ? ` · Context: ${esc(proposal.context_source)} (${(execution.context_import_ids || []).length} import(s))` : ""}</div>
           ${proposal.summary ? `<div class="debate-content" style="margin-top:8px;">${esc(proposal.summary)}</div>` : ""}
@@ -2300,18 +2310,11 @@
             </div>`;
           })()}
           <div class="debate-actions" style="margin-top:10px;">
-            ${execution.status === "pending_approval" ? `
-              <button ${pending ? "disabled" : ""} onclick="approveExecution('${esc(execution.execution_id || "")}', '${esc(debate.debate_id || "")}')">
-                ${pending ? "Working..." : "Approve"}
-              </button>
-              <button class="secondary" ${pending ? "disabled" : ""} onclick="rejectExecution('${esc(execution.execution_id || "")}', '${esc(debate.debate_id || "")}')">
-                ${pending ? "Working..." : "Reject"}
-              </button>
-            ` : `
+            ${execution.status !== "pending_approval" ? `
               <button class="secondary" ${pending ? "disabled" : ""} onclick="createExecutionFromDebate('${esc(debate.debate_id || "")}')">
                 ${pending ? "Creating..." : "Create New Execution"}
               </button>
-            `}
+            ` : ""}
             <button class="secondary" onclick='copyExecutionPayload(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(execution || {})))})))'>Copy Execution</button>
             ${executionContent ? `<button class="secondary" onclick='copyExecutionResult(decodeURIComponent(${JSON.stringify(encodeURIComponent(executionContent))}))'>Copy Result</button>` : ""}
             <button class="secondary" onclick="openExecutionExport('${esc(execution.execution_id || "")}')">Export</button>
