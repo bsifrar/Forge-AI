@@ -725,6 +725,14 @@
       scrollbar-color: var(--border-mid) transparent;
     }
 
+    /* ── Approval dialog ───────────────────────────── */
+    .approval-dialog-card { width: min(400px, 96vw); gap: 10px; }
+    .approval-dialog-card h2 { margin: 0 0 2px; font-size: 15px; }
+    .approval-dialog-card textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+    .approval-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
+    button.danger { background: #c0392b; border-color: #a93226; color: #fff; }
+    button.danger:hover { background: #a93226; }
+
     /* ── Overrides for specific IDs ───────────────── */
     #debateContextPackList { border-radius: 8px !important; background: var(--surface-2) !important; }
     #contextPreviewText { border-radius: 8px !important; color: var(--muted) !important; }
@@ -1227,6 +1235,18 @@
         </div>
       </div>
       <pre id="executionExportContent" class="handoff-preview-body">Loading…</pre>
+    </div>
+  </div>
+
+  <div id="approvalDialog" class="wizard-overlay" aria-hidden="true">
+    <div class="wizard-card approval-dialog-card">
+      <h2 id="approvalDialogTitle">Approve Execution</h2>
+      <p id="approvalDialogDesc" class="muted" style="margin:0;font-size:12px;">Optional approval note:</p>
+      <textarea id="approvalDialogNote" rows="3" placeholder="Leave blank to confirm without a note…"></textarea>
+      <div class="approval-dialog-actions">
+        <button class="secondary" onclick="cancelApprovalDialog()">Cancel</button>
+        <button id="approvalDialogConfirm" onclick="confirmApprovalDialog()">Approve</button>
+      </div>
     </div>
   </div>
 
@@ -3251,14 +3271,40 @@
       }
     }
 
+    let _approvalDialogResolve = null;
+
+    function openApprovalDialog(approved) {
+      const overlay = document.getElementById("approvalDialog");
+      document.getElementById("approvalDialogTitle").textContent = approved ? "Approve Execution" : "Reject Execution";
+      document.getElementById("approvalDialogDesc").textContent = approved ? "Optional approval note:" : "Optional rejection note:";
+      const confirmBtn = document.getElementById("approvalDialogConfirm");
+      confirmBtn.textContent = approved ? "Approve" : "Reject";
+      confirmBtn.className = approved ? "" : "danger";
+      document.getElementById("approvalDialogNote").value = "";
+      overlay.setAttribute("aria-hidden", "false");
+      overlay.classList.add("visible");
+      setTimeout(() => document.getElementById("approvalDialogNote").focus(), 50);
+      return new Promise(resolve => { _approvalDialogResolve = resolve; });
+    }
+
+    function cancelApprovalDialog() {
+      document.getElementById("approvalDialog").classList.remove("visible");
+      document.getElementById("approvalDialog").setAttribute("aria-hidden", "true");
+      if (_approvalDialogResolve) { _approvalDialogResolve(null); _approvalDialogResolve = null; }
+    }
+
+    function confirmApprovalDialog() {
+      const note = document.getElementById("approvalDialogNote").value;
+      document.getElementById("approvalDialog").classList.remove("visible");
+      document.getElementById("approvalDialog").setAttribute("aria-hidden", "true");
+      if (_approvalDialogResolve) { _approvalDialogResolve(note); _approvalDialogResolve = null; }
+    }
+
     async function decideExecution(executionId, debateId, approved) {
       if (!executionId || !debateId) return;
       state.executionPending[debateId] = true;
       renderDebates(state.debates || []);
-      const note = window.prompt(
-        approved ? "Optional approval note for this read-only execution:" : "Optional rejection note:",
-        ""
-      );
+      const note = await openApprovalDialog(approved);
       if (note === null) {
         delete state.executionPending[debateId];
         renderDebates(state.debates || []);
