@@ -538,6 +538,30 @@
     .debate-actions { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
     .debate-actions button { padding: 5px 9px; border-radius: 7px; font-size: 11px; }
 
+    .exec-status-band {
+      border-radius: 5px;
+      padding: 5px 9px;
+      margin-bottom: 7px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-left: 3px solid transparent;
+    }
+    .exec-status-band--pending   { background: rgba(217,119,6,0.10);  border-left-color: #d97706; }
+    .exec-status-band--completed { background: rgba(22,163,74,0.10);  border-left-color: #16a34a; }
+    .exec-status-band--rejected  { background: rgba(220,38,38,0.10);  border-left-color: #dc2626; }
+
+    .exec-outcome {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 7px 9px;
+      margin: 7px 0;
+      font-size: 11px;
+    }
+    .exec-outcome-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
+
     .debate-section { margin-top: 9px; border-top: 1px solid var(--border); padding-top: 9px; }
     .debate-section h4 {
       margin: 0 0 5px;
@@ -1899,6 +1923,97 @@
       return `${(numeric / (1024 * 1024)).toFixed(1)} MB`;
     }
 
+    // ── Execution lifecycle completion surface ─────────────────────────────
+    // Pure helpers; mirrors in tests/unit/test_execution_outcome.py
+
+    function executionOutcomeSummary(execution) {
+      const proposal = execution.proposal || {};
+      const result = execution.execution || {};
+      const mode = proposal.mode || result.mode || "read_only_v1";
+      const status = execution.status || "";
+      const commands = Array.isArray(result.commands) ? result.commands
+        : Array.isArray(proposal.commands) ? proposal.commands : [];
+      const patchPlan = result.patch_plan || proposal.patch_plan || null;
+      const patchHunks = patchPlan && Array.isArray(patchPlan.hunks) ? patchPlan.hunks : [];
+      const patchDraft = (result.patch_draft || proposal.patch_draft || "").trim();
+      const proposalSteps = Array.isArray(proposal.steps) ? proposal.steps : [];
+      const resultSteps = Array.isArray(result.steps) ? result.steps : [];
+      const steps = resultSteps.length ? resultSteps : proposalSteps;
+      return {
+        mode,
+        status,
+        stepCount: steps.length,
+        commandCount: commands.length,
+        patchHunkCount: patchHunks.length,
+        hasPatchDraft: Boolean(patchDraft),
+        hasExecutionResult: Boolean((result.result || "").trim()),
+        rejectionNote: (execution.approval_note || "").trim(),
+        isChangePlan: mode === "change_plan_v1",
+      };
+    }
+
+    function renderExecutionStatusBand(execution, s) {
+      const { mode, stepCount, commandCount, patchHunkCount, hasPatchDraft, rejectionNote, isChangePlan } = s;
+      const status = execution.status || "";
+      const modeLabel = isChangePlan ? "change plan" : "read-only review";
+      let text, cls;
+      if (status === "pending_approval") {
+        cls = "exec-status-band--pending";
+        text = `\u23F3 Awaiting approval \u00B7 ${modeLabel} \u00B7 ${stepCount} step${stepCount !== 1 ? "s" : ""} to review`;
+      } else if (status === "completed") {
+        cls = "exec-status-band--completed";
+        if (isChangePlan && (commandCount || patchHunkCount || hasPatchDraft)) {
+          const parts = [];
+          if (commandCount) parts.push(`${commandCount} command${commandCount !== 1 ? "s" : ""}`);
+          if (patchHunkCount) parts.push(`${patchHunkCount} patch hunk${patchHunkCount !== 1 ? "s" : ""}`);
+          if (hasPatchDraft) parts.push("patch draft");
+          text = `\u2713 Completed \u00B7 change plan \u00B7 ${parts.join(" \u00B7 ")}`;
+        } else {
+          text = `\u2713 Completed \u00B7 ${modeLabel} \u00B7 ${stepCount} step${stepCount !== 1 ? "s" : ""} recorded`;
+        }
+      } else if (status === "rejected") {
+        cls = "exec-status-band--rejected";
+        text = `\u2717 Rejected${rejectionNote ? ` \u00B7 ${rejectionNote}` : ""}`;
+      } else {
+        return "";
+      }
+      return `<div class="exec-status-band ${cls}">${esc(text)}</div>`;
+    }
+
+    function renderExecutionOutcome(execution, s) {
+      if (execution.status !== "completed") return "";
+      const { commandCount, patchHunkCount, hasPatchDraft, stepCount, isChangePlan } = s;
+      const proposal = execution.proposal || {};
+      const result = execution.execution || {};
+      const commands = Array.isArray(result.commands) ? result.commands
+        : Array.isArray(proposal.commands) ? proposal.commands : [];
+      const patchDraft = (result.patch_draft || proposal.patch_draft || "").trim();
+      const tags = [];
+      if (commandCount) tags.push(`${commandCount} command${commandCount !== 1 ? "s" : ""}`);
+      if (patchHunkCount) tags.push(`${patchHunkCount} patch hunk${patchHunkCount !== 1 ? "s" : ""}`);
+      if (hasPatchDraft) tags.push("patch draft");
+      if (!isChangePlan && stepCount) tags.push(`${stepCount} step${stepCount !== 1 ? "s" : ""} reviewed`);
+      const copyBtns = [];
+      if (commands.length) {
+        const cmdText = commands.join("\n");
+        copyBtns.push(`<button class="secondary" style="padding:2px 7px; font-size:10px;" onclick='copyText(decodeURIComponent(${JSON.stringify(encodeURIComponent(cmdText))}), "Commands copied.")'>Copy Commands</button>`);
+      }
+      if (patchDraft) {
+        copyBtns.push(`<button class="secondary" style="padding:2px 7px; font-size:10px;" onclick='copyText(decodeURIComponent(${JSON.stringify(encodeURIComponent(patchDraft))}), "Patch draft copied.")'>Copy Patch</button>`);
+      }
+      if (!tags.length && !copyBtns.length) return "";
+      return `
+        <div class="exec-outcome">
+          <div style="font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.07em; margin-bottom:5px;">Output</div>
+          <div class="exec-outcome-tags">
+            ${tags.map(t => `<span class="pill" style="font-size:10px; background:var(--surface-0);">${esc(t)}</span>`).join("")}
+            ${copyBtns.join("")}
+          </div>
+        </div>
+      `;
+    }
+    // ── End execution lifecycle surface ────────────────────────────────────
+
     function renderDebateExecution(debate) {
       const execution = state.executionsByDebateId[debate.debate_id] || null;
       const pending = Boolean(state.executionPending[debate.debate_id]);
@@ -1971,10 +2086,13 @@
       const commands = Array.isArray(result.commands) ? result.commands : (Array.isArray(proposal.commands) ? proposal.commands : []);
       const patchPlan = result.patch_plan || proposal.patch_plan || null;
       const patchDraft = result.patch_draft || proposal.patch_draft || "";
+      const outcomeSummary = executionOutcomeSummary(execution);
       return `
         <div class="debate-section">
           <h4>Execution</h4>
-          <div class="help-text">Status: ${esc(execution.status || "unknown")} · Mode: ${esc(proposal.mode || result.mode || "unknown")}${proposal.context_source ? ` · Context: ${esc(proposal.context_source)} (${(execution.context_import_ids || []).length} import(s))` : ""}</div>
+          ${renderExecutionStatusBand(execution, outcomeSummary)}
+          ${renderExecutionOutcome(execution, outcomeSummary)}
+          <div class="help-text">Mode: ${esc(proposal.mode || result.mode || "unknown")}${proposal.context_source ? ` · Context: ${esc(proposal.context_source)} (${(execution.context_import_ids || []).length} import(s))` : ""}</div>
           ${proposal.summary ? `<div class="debate-content" style="margin-top:8px;">${esc(proposal.summary)}</div>` : ""}
           ${proposal.artifact_summary ? `<div class="help-text" style="margin-top:8px;">${esc(proposal.artifact_summary)}</div>` : ""}
           ${executionArtifacts.length ? `
