@@ -505,6 +505,20 @@
       bottom: -1px;
     }
     .tab-bar button.active:hover { box-shadow: none; }
+    .tab-badge {
+      display: inline-block;
+      background: #d97706;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 8px;
+      margin-left: 3px;
+      vertical-align: middle;
+      letter-spacing: 0;
+    }
+    .tab-badge:empty { display: none; }
 
     .tab-panel { display: none; min-width: 0; }
     .tab-panel.active { display: block; }
@@ -798,7 +812,7 @@
           <button id="tabBtnControl" class="active" onclick="setSidebarTab('control')">Control</button>
           <button id="tabBtnSessions" onclick="setSidebarTab('sessions')">Sessions</button>
           <button id="tabBtnImports" onclick="setSidebarTab('imports')">Imports</button>
-          <button id="tabBtnDebates" onclick="setSidebarTab('debates')">Debates</button>
+          <button id="tabBtnDebates" onclick="setSidebarTab('debates')">Debates <span id="debatePendingBadge" class="tab-badge"></span></button>
           <button id="tabBtnDashboard" onclick="setSidebarTab('dashboard')">Dashboard</button>
         </div>
       </div>
@@ -1892,10 +1906,17 @@
     }
     // ── End next-action ────────────────────────────────────────────────────
 
+    function updatePendingBadge() {
+      const count = Object.values(state.executionsByDebateId).filter(e => e && e.status === "pending_approval").length;
+      const badge = document.getElementById("debatePendingBadge");
+      if (badge) badge.textContent = count > 0 ? String(count) : "";
+    }
+
     function renderDebates(debates = []) {
       state.debates = debates;
       const root = document.getElementById("debates");
       document.getElementById("debateCount").textContent = debates.length;
+      updatePendingBadge();
       if (state.debatesLoading) {
         root.innerHTML = `<div class="muted">Loading debates...</div>`;
         return;
