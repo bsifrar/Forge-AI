@@ -34,7 +34,7 @@
       --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.55);
       /* Layout */
       --header-h: 50px;
-      --rail-w: 280px;
+      --rail-w: 360px;
       --inspector-w: 264px;
       /* Aliases for inline-style fallbacks */
       --bg-alt: #181b2e;
@@ -119,7 +119,7 @@
     }
     .sidebar-nav {
       flex-shrink: 0;
-      padding: 12px 12px 0;
+      padding: 10px 10px 0;
       border-bottom: 1px solid var(--border);
       background: var(--surface-0);
     }
@@ -127,7 +127,7 @@
       flex: 1;
       min-height: 0;
       overflow-y: auto;
-      padding: 14px 12px 12px;
+      padding: 12px 10px 10px;
       scrollbar-width: thin;
       scrollbar-color: var(--border-mid) transparent;
     }
@@ -180,7 +180,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
     }
-    .sidebar .panel { padding: 14px; margin-bottom: 10px; }
+    .sidebar .panel { padding: 12px; margin-bottom: 10px; }
     .sidebar .panel:last-child { margin-bottom: 0; }
 
     /* ── Typography ───────────────────────────────── */
@@ -260,8 +260,10 @@
       color: var(--dim);
       margin-bottom: 0;
     }
-    .inline-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .inline-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .inline-row > * { min-width: 0; }
+    .inline-row select { flex: 1; }
+    .inline-row input[type="number"] { width: 90px; flex-shrink: 0; }
 
     /* ── Form controls ────────────────────────────── */
     input, textarea, select, button {
@@ -476,16 +478,17 @@
     .tab-bar { display: flex; gap: 2px; margin-bottom: 0; flex-wrap: nowrap; }
     .tab-bar button {
       flex: 1;
+      min-width: 0;
       text-align: center;
       background: transparent;
       color: var(--dim);
       border: 1px solid transparent;
       border-bottom: none;
       border-radius: 7px 7px 0 0;
-      padding: 8px 6px;
+      padding: 7px 3px;
       font-size: 11px;
       font-weight: 600;
-      letter-spacing: 0.03em;
+      letter-spacing: 0.02em;
       transition: color 100ms ease, background 100ms ease;
       box-shadow: none;
       white-space: nowrap;
@@ -511,7 +514,9 @@
     .chat-actions button { padding: 6px 10px; border-radius: 8px; font-size: 12px; }
 
     .search-row { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-bottom: 2px; }
-    .search-row input { flex: 1; min-width: 180px; }
+    .search-row input { flex: 1; min-width: 140px; }
+    /* In the sidebar the rail is narrower so allow inputs to shrink further */
+    .sidebar .search-row input { min-width: 0; }
     .search-row .pill { background: var(--surface-1); border-color: var(--border); color: var(--dim); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 11px; }
 
     .help-text { font-size: 11px; color: var(--muted); line-height: 1.4; }
@@ -736,8 +741,11 @@
     }
 
     /* ── Responsive ───────────────────────────────── */
-    @media (max-width: 1280px) {
-      :root { --rail-w: 260px; --inspector-w: 248px; }
+    @media (max-width: 1400px) {
+      :root { --rail-w: 320px; --inspector-w: 248px; }
+    }
+    @media (max-width: 1100px) {
+      :root { --rail-w: 290px; --inspector-w: 220px; }
     }
     @media (max-width: 960px) {
       html, body { height: auto; overflow: auto; }
@@ -963,7 +971,7 @@
                 <option value="all">All from selected files</option>
                 <option value="custom">Custom limit</option>
               </select>
-              <input id="importMax" type="number" step="1" value="25" placeholder="Custom limit" disabled style="max-width: 150px;" />
+              <input id="importMax" type="number" step="1" value="25" placeholder="Custom limit" disabled />
             </div>
             <div id="importModeHelp" class="help-text">Current mode: import up to 25 conversations from each selected file.</div>
             <button onclick="importChatGPT()">Choose File + Import</button>
