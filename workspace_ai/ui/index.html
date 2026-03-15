@@ -1289,6 +1289,7 @@
       executionContextOverride: {},  // debateId → List[string] (null key means use inherited)
       contextOverrideOpen: null,     // debateId | null
       contextPackPresets: [],        // List of {preset_id, project_id, name, import_ids}
+      debatesInitialized: false,     // true after first successful loadDebates(); suppresses first-load transition toasts
       debatePoller: null,            // setInterval handle while any debate is running
       executionExportText: null,     // text shown in export preview modal
       dashboardPayload: null,        // cached dashboard API response for re-filtering
@@ -1600,14 +1601,22 @@
 
     let toastTimer = null;
 
-    function showToast(message, kind = "ok") {
+    function showToast(message, kind = "ok", onclick = null) {
       const node = document.getElementById("toast");
-      node.textContent = message;
+      if (onclick) {
+        node.innerHTML = `${esc(message)} <span style="opacity:0.55;font-size:10px;margin-left:4px;">→ View</span>`;
+        node.style.pointerEvents = "auto";
+        node.style.cursor = "pointer";
+        node.onclick = () => { node.className = "toast"; onclick(); };
+      } else {
+        node.textContent = message;
+        node.style.pointerEvents = "";
+        node.style.cursor = "";
+        node.onclick = null;
+      }
       node.className = `toast visible ${kind === "error" ? "error" : ""}`.trim();
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => {
-        node.className = "toast";
-      }, 2200);
+      toastTimer = setTimeout(() => { node.className = "toast"; }, onclick ? 5000 : 2200);
     }
 
     async function copyText(value, successMessage) {
@@ -3015,6 +3024,8 @@
       const projectId = document.getElementById("debateProjectId").value.trim() || "forge";
       // Keep shared active project in sync with whatever was in the debates field
       if (projectId !== state.activeProjectId) setActiveProject(projectId);
+      // Snapshot current debate statuses for transition detection after fetch
+      const _prevStatuses = Object.fromEntries((state.debates || []).map(d => [d.debate_id, d.status]));
       state.debatesLoading = true;
       if (refreshBtn) refreshBtn.disabled = true;
       statusEl.textContent = "Loading debates...";
@@ -3034,6 +3045,21 @@
         state.executionsByDebateId = executionMap;
         renderDebates(payload.debates || []);
         statusEl.textContent = `Loaded ${payload.count || 0} debate(s).`;
+        // Detect state transitions and notify (skip on first load to avoid false positives)
+        if (state.debatesInitialized) {
+          for (const debate of (payload.debates || [])) {
+            const prev = _prevStatuses[debate.debate_id];
+            const wasRunning = prev === "pending" || prev === "running";
+            const nowDone = debate.status === "completed" || debate.status === "max_rounds" || debate.status === "failed";
+            if (wasRunning && nowDone) {
+              const topic = (debate.topic || debate.debate_id || "").slice(0, 48);
+              const label = debate.status === "failed" ? "failed" : debate.status === "max_rounds" ? "reached max rounds" : "completed";
+              const debateId = debate.debate_id;
+              showToast(`Debate ${label}: \u201c${topic}\u201d`, debate.status === "failed" ? "error" : "ok", () => focusDebate(debateId));
+            }
+          }
+        }
+        state.debatesInitialized = true;
         const hasRunning = (payload.debates || []).some(d => d.status === "pending" || d.status === "running");
         if (hasRunning) startDebatePoller(); else stopDebatePoller();
       } catch (error) {
