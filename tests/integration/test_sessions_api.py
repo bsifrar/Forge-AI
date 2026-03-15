@@ -985,3 +985,134 @@ def test_execution_export_debate_linked_includes_topic(monkeypatch, isolated_wor
     assert "Export integration debate" in text
     assert "SOURCE PLAN" in text
     assert debate_id in text
+
+
+# ── project dashboard ──────────────────────────────────────────────────────────
+
+def test_project_dashboard_empty_project(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    resp = client.get("/workspace/projects/empty_proj/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["project_id"] == "empty_proj"
+    assert data["debate_summary"]["total"] == 0
+    assert data["execution_summary"]["total"] == 0
+    assert data["recent_debates"] == []
+    assert data["recent_executions"] == []
+
+
+def test_project_dashboard_counts_debates_by_status(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    # Create 2 debates: one running (via async start), one still pending
+    d1 = client.post("/workspace/debates", json={
+        "project_id": "myproject",
+        "topic": "Dashboard test debate A",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+    })
+    d2 = client.post("/workspace/debates", json={
+        "project_id": "myproject",
+        "topic": "Dashboard test debate B",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+    })
+    assert d1.status_code == 200
+    assert d2.status_code == 200
+    # Wait for both to complete
+    _wait_for_debate(client, d1.json()["debate"]["debate_id"])
+    _wait_for_debate(client, d2.json()["debate"]["debate_id"])
+
+    resp = client.get("/workspace/projects/myproject/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()
+    ds = data["debate_summary"]
+    assert ds["total"] == 2
+    # Both should be in a terminal state (completed or max_rounds)
+    assert (ds["completed"] + ds["max_rounds"]) == 2
+
+
+def test_project_dashboard_counts_executions_by_status(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    e1 = client.post("/workspace/executions", json={"project_id": "proj", "plan": "Step A."})
+    e2 = client.post("/workspace/executions", json={"project_id": "proj", "plan": "Step B."})
+    assert e1.status_code == 200
+    assert e2.status_code == 200
+    exec_id_1 = e1.json()["execution"]["execution_id"]
+    # approve e1
+    client.post(f"/workspace/executions/{exec_id_1}/approval", json={"approved": True, "note": "ok"})
+
+    resp = client.get("/workspace/projects/proj/dashboard")
+    data = resp.json()
+    es = data["execution_summary"]
+    assert es["total"] == 2
+    assert es["completed"] == 1
+    assert es["pending_approval"] == 1
+
+
+def test_project_dashboard_scopes_to_project(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    client.post("/workspace/executions", json={"project_id": "proj_a", "plan": "A plan."})
+    client.post("/workspace/executions", json={"project_id": "proj_b", "plan": "B plan."})
+
+    resp_a = client.get("/workspace/projects/proj_a/dashboard")
+    resp_b = client.get("/workspace/projects/proj_b/dashboard")
+
+    assert resp_a.json()["execution_summary"]["total"] == 1
+    assert resp_b.json()["execution_summary"]["total"] == 1
+
+
+def test_project_dashboard_recent_items_respect_limit(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    for i in range(7):
+        client.post("/workspace/executions", json={"project_id": "proj", "plan": f"Step {i}."})
+
+    resp = client.get("/workspace/projects/proj/dashboard?recent_limit=3")
+    assert resp.status_code == 200
+    assert len(resp.json()["recent_executions"]) == 3
+
+
+def test_project_dashboard_invalid_limit_is_422(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+    resp = client.get("/workspace/projects/forge/dashboard?recent_limit=0")
+    assert resp.status_code == 422
+
+
+def test_project_dashboard_recent_debate_includes_required_fields(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    d = client.post("/workspace/debates", json={
+        "project_id": "proj",
+        "topic": "Field verification debate",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+    })
+    debate_id = d.json()["debate"]["debate_id"]
+    _wait_for_debate(client, debate_id)
+
+    resp = client.get("/workspace/projects/proj/dashboard")
+    debate = resp.json()["recent_debates"][0]
+    assert debate["debate_id"] == debate_id
+    assert debate["topic"] == "Field verification debate"
+    assert debate["status"] in {"completed", "max_rounds", "failed"}
+    assert "updated_at" in debate
+    assert "created_at" in debate

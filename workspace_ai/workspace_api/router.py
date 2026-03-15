@@ -185,6 +185,13 @@ def build_router(manager: SessionManager) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"Execution not found: {execution_id}")
         return payload
 
+    @router.get("/projects/{project_id}/dashboard")
+    def project_dashboard(project_id: str, recent_limit: int = Query(default=5, ge=1, le=20)) -> dict:
+        try:
+            return manager.get_project_dashboard(project_id=project_id, recent_limit=recent_limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @router.get("/executions/{execution_id}/export")
     def export_execution(execution_id: str) -> dict:
         payload = manager.export_execution(execution_id=execution_id)

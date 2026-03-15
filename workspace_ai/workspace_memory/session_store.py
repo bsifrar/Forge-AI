@@ -601,6 +601,79 @@ class SessionStore:
                 out.append(execution)
         return out
 
+    def get_project_dashboard(self, *, project_id: str, recent_limit: int = 5) -> Dict[str, Any]:
+        limit = max(1, min(20, int(recent_limit)))
+        with self._connect() as conn:
+            debate_counts = conn.execute(
+                "SELECT status, COUNT(*) AS cnt FROM debates WHERE project_id = ? GROUP BY status",
+                (project_id,),
+            ).fetchall()
+            execution_counts = conn.execute(
+                "SELECT status, COUNT(*) AS cnt FROM executions WHERE project_id = ? GROUP BY status",
+                (project_id,),
+            ).fetchall()
+            recent_debate_rows = conn.execute(
+                "SELECT debate_id, topic, status, debate_style, updated_at, created_at "
+                "FROM debates WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?",
+                (project_id, limit),
+            ).fetchall()
+            recent_execution_rows = conn.execute(
+                "SELECT execution_id, debate_id, status, proposal_json, source_plan_json, updated_at, created_at "
+                "FROM executions WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?",
+                (project_id, limit),
+            ).fetchall()
+
+        debate_summary: Dict[str, Any] = {"total": 0, "pending": 0, "running": 0, "completed": 0, "max_rounds": 0, "failed": 0}
+        for row in debate_counts:
+            s = str(row["status"] or "")
+            c = int(row["cnt"] or 0)
+            debate_summary["total"] += c
+            if s in debate_summary:
+                debate_summary[s] = c
+
+        execution_summary: Dict[str, Any] = {"total": 0, "pending_approval": 0, "completed": 0, "rejected": 0}
+        for row in execution_counts:
+            s = str(row["status"] or "")
+            c = int(row["cnt"] or 0)
+            execution_summary["total"] += c
+            if s in execution_summary:
+                execution_summary[s] = c
+
+        recent_debates = [
+            {
+                "debate_id": str(row["debate_id"]),
+                "topic": str(row["topic"] or ""),
+                "status": str(row["status"] or ""),
+                "debate_style": str(row["debate_style"] or "standard"),
+                "updated_at": str(row["updated_at"] or ""),
+                "created_at": str(row["created_at"] or ""),
+            }
+            for row in recent_debate_rows
+        ]
+
+        recent_executions = []
+        for row in recent_execution_rows:
+            proposal = json.loads(str(row["proposal_json"] or "{}"))
+            source_plan = json.loads(str(row["source_plan_json"] or "{}"))
+            recent_executions.append({
+                "execution_id": str(row["execution_id"]),
+                "debate_id": str(row["debate_id"] or ""),
+                "status": str(row["status"] or ""),
+                "mode": str(proposal.get("mode") or "read_only_v1"),
+                "topic": str(source_plan.get("topic") or ""),
+                "source_type": str(source_plan.get("source_type") or ""),
+                "updated_at": str(row["updated_at"] or ""),
+                "created_at": str(row["created_at"] or ""),
+            })
+
+        return {
+            "project_id": project_id,
+            "debate_summary": debate_summary,
+            "execution_summary": execution_summary,
+            "recent_debates": recent_debates,
+            "recent_executions": recent_executions,
+        }
+
     # ── context_imports ───────────────────────────────────────────────────────
 
     _VALID_IMPORT_CATEGORIES = {"preference", "project_background", "reference", "transient"}

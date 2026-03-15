@@ -109,6 +109,13 @@ class SessionManager:
     def export_execution(self, *, execution_id: str) -> Dict[str, Any]:
         return self.execution_export_service.export_execution(execution_id=execution_id)
 
+    def get_project_dashboard(self, *, project_id: str, recent_limit: int = 5) -> Dict[str, Any]:
+        normalized = str(project_id or "").strip()
+        if not normalized:
+            raise ValueError("project_id is required")
+        data = self.store.get_project_dashboard(project_id=normalized, recent_limit=recent_limit)
+        return {"status": "ok", **data}
+
     def create_execution_from_handoff(self, *, debate_id: str, execution_mode: str = "read_only_v1", context_import_ids: list[str] | None = None) -> Dict[str, Any]:
         result = self.executor_service.create_execution_from_handoff(
             debate_id=debate_id,
