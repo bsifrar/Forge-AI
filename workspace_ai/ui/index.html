@@ -1140,6 +1140,22 @@
     </div>
   </div>
 
+  <div id="executionExportPreview" class="wizard-overlay" aria-hidden="true">
+    <div class="wizard-card handoff-preview-card">
+      <div class="toolbar">
+        <div>
+          <h2 style="margin-bottom:0;">Execution Export</h2>
+          <p id="executionExportMeta" class="muted" style="font-size:11px;margin-top:3px;"></p>
+        </div>
+        <div class="toolbar-actions">
+          <button onclick="copyExecutionExportFromPreview()">Copy to Clipboard</button>
+          <button class="secondary" onclick="closeExecutionExport()">Close</button>
+        </div>
+      </div>
+      <pre id="executionExportContent" class="handoff-preview-body">Loading…</pre>
+    </div>
+  </div>
+
   <div id="toast" class="toast" aria-live="polite"></div>
   <script>
     const state = {
@@ -1166,6 +1182,7 @@
       contextOverrideOpen: null,     // debateId | null
       contextPackPresets: [],        // List of {preset_id, project_id, name, import_ids}
       debatePoller: null,            // setInterval handle while any debate is running
+      executionExportText: null,     // text shown in export preview modal
     };
 
     function draftStorageKey(sessionId) {
@@ -1921,6 +1938,7 @@
             `}
             <button class="secondary" onclick='copyExecutionPayload(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(execution || {})))})))'>Copy Execution</button>
             ${executionContent ? `<button class="secondary" onclick='copyExecutionResult(decodeURIComponent(${JSON.stringify(encodeURIComponent(executionContent))}))'>Copy Result</button>` : ""}
+            <button class="secondary" onclick="openExecutionExport('${esc(execution.execution_id || "")}')">Export</button>
             <button class="secondary" onclick="openHandoffPreview(null, '${esc(execution.execution_id || "")}')">Handoff</button>
           </div>
         </div>
@@ -2118,6 +2136,40 @@
       document.getElementById("handoffPreview").classList.remove("visible");
       state.handoffPreviewText = null;
       state.handoffPreviewDebateId = null;
+    }
+
+    async function openExecutionExport(executionId) {
+      const overlay = document.getElementById("executionExportPreview");
+      const contentEl = document.getElementById("executionExportContent");
+      const metaEl = document.getElementById("executionExportMeta");
+      state.executionExportText = null;
+      overlay.classList.add("visible");
+      contentEl.textContent = "Loading…";
+      metaEl.textContent = "";
+      try {
+        const resp = await fetch(`/workspace/executions/${encodeURIComponent(executionId)}/export`);
+        if (!resp.ok) { contentEl.textContent = `Error ${resp.status}: failed to load export.`; return; }
+        const data = await resp.json();
+        const text = (data.export || {}).text || JSON.stringify(data, null, 2);
+        contentEl.textContent = text;
+        state.executionExportText = text;
+        const lines = (data.export || {}).line_count || text.split("\n").length;
+        const chars = (data.export || {}).char_count || text.length;
+        metaEl.textContent = `${lines} lines · ${chars.toLocaleString()} chars`;
+      } catch (err) {
+        contentEl.textContent = `Error: ${err.message}`;
+      }
+    }
+
+    function closeExecutionExport() {
+      document.getElementById("executionExportPreview").classList.remove("visible");
+      state.executionExportText = null;
+    }
+
+    async function copyExecutionExportFromPreview() {
+      if (!state.executionExportText) return;
+      await copyText(state.executionExportText, "Execution export copied.");
+      closeExecutionExport();
     }
 
     async function executeFromHandoffPreview(executionMode) {

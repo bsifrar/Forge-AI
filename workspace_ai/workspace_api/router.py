@@ -185,6 +185,13 @@ def build_router(manager: SessionManager) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"Execution not found: {execution_id}")
         return payload
 
+    @router.get("/executions/{execution_id}/export")
+    def export_execution(execution_id: str) -> dict:
+        payload = manager.export_execution(execution_id=execution_id)
+        if payload.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail=f"Execution not found: {execution_id}")
+        return payload
+
     @router.post("/executions/{execution_id}/approval")
     def approve_execution(execution_id: str, request: ExecutionApprovalRequest) -> dict:
         try:

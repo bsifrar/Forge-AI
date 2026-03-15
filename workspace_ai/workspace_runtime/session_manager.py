@@ -11,6 +11,7 @@ from workspace_ai.workspace_runtime.chat_service import ChatService
 from workspace_ai.workspace_runtime.context_import_service import ContextImportService
 from workspace_ai.workspace_runtime.context_pack_preset_service import ContextPackPresetService
 from workspace_ai.workspace_runtime.debate_service import DebateService
+from workspace_ai.workspace_runtime.execution_export_service import ExecutionExportService
 from workspace_ai.workspace_runtime.executor_service import ExecutorService
 from workspace_ai.workspace_runtime.handoff_service import HandoffService
 from workspace_ai.workspace_runtime.mediation_service import MediationService
@@ -31,6 +32,7 @@ class SessionManager:
         self.context_import_service = ContextImportService(store=self.store)
         self.context_pack_preset_service = ContextPackPresetService(store=self.store)
         self.executor_service = ExecutorService(store=self.store)
+        self.execution_export_service = ExecutionExportService(store=self.store)
         self.handoff_service = HandoffService(store=self.store, settings_service=self.settings_service)
         self.mediation_service = MediationService(store=self.store)
         self.policy_service = PolicyService(store=self.store, settings_service=self.settings_service)
@@ -103,6 +105,9 @@ class SessionManager:
 
     def get_execution(self, *, execution_id: str) -> Dict[str, Any]:
         return self.executor_service.get_execution(execution_id=execution_id)
+
+    def export_execution(self, *, execution_id: str) -> Dict[str, Any]:
+        return self.execution_export_service.export_execution(execution_id=execution_id)
 
     def create_execution_from_handoff(self, *, debate_id: str, execution_mode: str = "read_only_v1", context_import_ids: list[str] | None = None) -> Dict[str, Any]:
         result = self.executor_service.create_execution_from_handoff(

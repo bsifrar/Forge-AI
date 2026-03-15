@@ -902,3 +902,86 @@ def test_execute_from_handoff_inherits_context_imports(monkeypatch, isolated_wor
     assert import_id in execution["context_import_ids"]
     assert execution["proposal"]["context_source"] == "inherited"
     assert execution["source_plan"]["source_type"] == "handoff_v1"
+
+
+# ── execution export ───────────────────────────────────────────────────────────
+
+def test_execution_export_not_found_is_404(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+    resp = client.get("/workspace/executions/exe_ghost/export")
+    assert resp.status_code == 404
+
+
+def test_execution_export_read_only_returns_text(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    exe = client.post("/workspace/executions", json={
+        "project_id": "forge",
+        "plan": "Inspect the router.\nAdd execution endpoints.",
+    })
+    assert exe.status_code == 200
+    execution_id = exe.json()["execution"]["execution_id"]
+
+    resp = client.get(f"/workspace/executions/{execution_id}/export")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["execution_id"] == execution_id
+    text = data["export"]["text"]
+    assert "FORGE EXECUTION EXPORT" in text
+    assert "END FORGE EXECUTION EXPORT" in text
+    assert "PROPOSED STEPS" in text
+    assert "Inspect the router." in text
+    assert data["export"]["line_count"] > 5
+    assert data["export"]["char_count"] > 50
+
+
+def test_execution_export_change_plan_includes_patch(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    exe = client.post("/workspace/executions", json={
+        "project_id": "forge",
+        "plan": "Update the debate panel UI.\nAdd a safer execution mode.",
+        "execution_mode": "change_plan_v1",
+    })
+    assert exe.status_code == 200
+    execution_id = exe.json()["execution"]["execution_id"]
+
+    resp = client.get(f"/workspace/executions/{execution_id}/export")
+    assert resp.status_code == 200
+    text = resp.json()["export"]["text"]
+    assert "PATCH PLAN" in text
+    assert "PATCH DRAFT" in text
+    assert "SUGGESTED COMMANDS" in text
+
+
+def test_execution_export_debate_linked_includes_topic(monkeypatch, isolated_workspace_env):
+    monkeypatch.setenv("WORKSPACE_STORAGE_PATH", str(isolated_workspace_env))
+    app = build_app()
+    client = TestClient(app)
+
+    debate_resp = client.post("/workspace/debates", json={
+        "project_id": "forge",
+        "topic": "Export integration debate",
+        "participants": [{"provider": "openai", "model": "test-model"}],
+        "max_rounds": 1,
+    })
+    debate_id = debate_resp.json()["debate"]["debate_id"]
+    _wait_for_debate(client, debate_id)
+
+    exe = client.post("/workspace/executions", json={"project_id": "forge", "debate_id": debate_id})
+    assert exe.status_code == 200
+    execution_id = exe.json()["execution"]["execution_id"]
+
+    resp = client.get(f"/workspace/executions/{execution_id}/export")
+    assert resp.status_code == 200
+    text = resp.json()["export"]["text"]
+    assert "Export integration debate" in text
+    assert "SOURCE PLAN" in text
+    assert debate_id in text
