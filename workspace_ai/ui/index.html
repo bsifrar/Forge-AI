@@ -2262,7 +2262,16 @@
               `).join("")}
             </div>
           `) : ""}
-          ${commands.length ? `
+          ${commands.length ? (execution.status === "completed" ? `
+            <details style="margin-top:10px;">
+              <summary style="cursor:pointer; font-size:12px; font-weight:600; color:var(--muted); user-select:none;">Commands (${commands.length})</summary>
+              <div class="context-list" style="margin-top:6px;">
+                ${commands.map(command => `
+                  <div class="context-item"><code>${esc(command)}</code></div>
+                `).join("")}
+              </div>
+            </details>
+          ` : `
             <div style="margin-top:10px;">
               <strong style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Suggested Commands</strong>
               <div class="context-list">
@@ -2271,7 +2280,7 @@
                 `).join("")}
               </div>
             </div>
-          ` : ""}
+          `) : ""}
           ${patchPlan ? `
             <div style="margin-top:10px;">
               <strong style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Patch Plan</strong>
