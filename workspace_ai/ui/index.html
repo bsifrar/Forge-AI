@@ -2302,7 +2302,8 @@
           ${(execution.approval_note || "").trim() ? `<div class="help-text" style="margin-top:8px;"><strong>Approval note</strong>: ${esc(execution.approval_note)}</div>` : ""}
           ${(() => {
             const na = executionNextAction(execution);
-            if (!na) return "";
+            // pending_approval: Approve/Reject already surfaced at top of section — suppress duplicate
+            if (!na || execution.status === "pending_approval") return "";
             const onclick = _nextActionOnclick(na, debate.debate_id || "");
             return `<div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
               <span class="muted" style="font-size:11px;">Next:</span>
