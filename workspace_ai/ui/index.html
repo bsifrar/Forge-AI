@@ -1706,6 +1706,85 @@
       }
     }
 
+    // ── Next-action recommendation ─────────────────────────────────────────
+    // Pure functions: map object state → {label, kind, ...ids} | null
+    // These are the canonical rule definitions; the Python test file mirrors them.
+
+    function debateNextAction(debate) {
+      const status = debate.status || "";
+      const debateId = debate.debate_id || "";
+      if (status === "pending" || status === "running") {
+        return { label: "Running\u2026", kind: "running", disabled: true, debateId };
+      }
+      const terminal = status === "completed" || status === "max_rounds" || status === "failed";
+      if (!terminal) return null;
+      if (status === "failed") return null; // card shows failed; no clear recoverable next step
+      const execution = state.executionsByDebateId[debateId] || null;
+      if (!execution) {
+        return { label: "Create Execution", kind: "create_execution", debateId };
+      }
+      const execStatus = execution.status || "";
+      if (execStatus === "pending_approval") {
+        return { label: "Review \u0026 Approve", kind: "review_execution", debateId };
+      }
+      if (execStatus === "completed") {
+        return { label: "Export Result", kind: "export_result", debateId, executionId: execution.execution_id };
+      }
+      if (execStatus === "rejected") {
+        return { label: "New Execution", kind: "create_execution", debateId };
+      }
+      return { label: "Open Handoff", kind: "open_handoff", debateId };
+    }
+
+    function executionNextAction(execution) {
+      const status = execution.status || "";
+      const executionId = execution.execution_id || "";
+      if (status === "pending_approval") {
+        return { label: "Approve", kind: "approve_execution", executionId };
+      }
+      if (status === "completed") {
+        return { label: "Export Result", kind: "export_result", executionId };
+      }
+      if (status === "rejected") {
+        return { label: "New Execution", kind: "new_execution", executionId: null };
+      }
+      return null;
+    }
+
+    function _nextActionOnclick(action, debateId) {
+      const dId = esc(action.debateId || debateId || "");
+      const eId = esc(action.executionId || "");
+      switch (action.kind) {
+        case "create_execution":
+          return `createExecutionFromDebate('${dId}', 'read_only_v1')`;
+        case "open_handoff":
+          return `openHandoffPreview('${dId}', null)`;
+        case "review_execution":
+          return `document.getElementById('debate-card-${dId}')?.querySelector('.debate-section')?.scrollIntoView({behavior:'smooth',block:'nearest'})`;
+        case "approve_execution":
+          return `approveExecution('${eId}', '${dId}')`;
+        case "export_result":
+          return eId
+            ? `openExecutionExport('${eId}')`
+            : `openHandoffPreview('${dId}', null)`;
+        case "new_execution":
+          return `createExecutionFromDebate('${dId}', 'read_only_v1')`;
+        default:
+          return "";
+      }
+    }
+
+    function renderNextActionBtn(action, debateId) {
+      if (!action) return "";
+      if (action.disabled) {
+        return `<button disabled style="opacity:0.55; cursor:default;">${esc(action.label)}</button>`;
+      }
+      const onclick = _nextActionOnclick(action, debateId);
+      if (!onclick) return "";
+      return `<button onclick="${onclick}">${esc(action.label)}</button>`;
+    }
+    // ── End next-action ────────────────────────────────────────────────────
+
     function renderDebates(debates = []) {
       state.debates = debates;
       const root = document.getElementById("debates");
@@ -1752,6 +1831,7 @@
             `).join("") || `<div class="muted">No rounds recorded.</div>`}
           </div>
           <div class="debate-actions">
+            ${renderNextActionBtn(debateNextAction(debate), debate.debate_id || "")}
             <button class="secondary" onclick='copyDebatePlan(decodeURIComponent(${JSON.stringify(encodeURIComponent((debate.final_plan || {}).content || ""))}))'>Copy Plan</button>
             <button class="secondary" onclick='copyFullDebate(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(debate || {})))})))'>Copy Full Debate</button>
             <button class="secondary" onclick="openHandoffPreview('${esc(debate.debate_id || "")}', null)">Handoff</button>
@@ -1963,6 +2043,15 @@
             </div>
           ` : ""}
           ${(execution.approval_note || "").trim() ? `<div class="help-text" style="margin-top:8px;"><strong>Approval note</strong>: ${esc(execution.approval_note)}</div>` : ""}
+          ${(() => {
+            const na = executionNextAction(execution);
+            if (!na) return "";
+            const onclick = _nextActionOnclick(na, debate.debate_id || "");
+            return `<div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
+              <span class="muted" style="font-size:11px;">Next:</span>
+              <button ${onclick ? `onclick="${onclick}"` : "disabled"} style="padding:4px 10px; font-size:11px;">${esc(na.label)}</button>
+            </div>`;
+          })()}
           <div class="debate-actions" style="margin-top:10px;">
             ${execution.status === "pending_approval" ? `
               <button ${pending ? "disabled" : ""} onclick="approveExecution('${esc(execution.execution_id || "")}', '${esc(debate.debate_id || "")}')">
