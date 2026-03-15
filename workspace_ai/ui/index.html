@@ -397,6 +397,10 @@
       letter-spacing: 0.06em;
       text-transform: uppercase;
     }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.55; }
+    }
 
     .warning { color: var(--warning); }
 
@@ -1161,6 +1165,7 @@
       executionContextOverride: {},  // debateId → List[string] (null key means use inherited)
       contextOverrideOpen: null,     // debateId | null
       contextPackPresets: [],        // List of {preset_id, project_id, name, import_ids}
+      debatePoller: null,            // setInterval handle while any debate is running
     };
 
     function draftStorageKey(sessionId) {
@@ -1656,9 +1661,11 @@
         root.innerHTML = `<div class="muted">No debates yet.</div>`;
         return;
       }
-      root.innerHTML = debates.map(debate => `
+      root.innerHTML = debates.map(debate => {
+        const isRunning = debate.status === "pending" || debate.status === "running";
+        return `
         <div class="debate-card">
-          <h3>${esc(debate.topic || debate.debate_id)}</h3>
+          <h3>${esc(debate.topic || debate.debate_id)}${isRunning ? ' <span class="pill" style="background:var(--accent-blue,#2563eb);color:#fff;animation:pulse 1.5s infinite;">running…</span>' : ""}</h3>
           <div class="meta">
             ${esc(debate.project_id || "forge")} · ${esc(debate.debate_id || "")} · ${esc(debate.status || "unknown")}${debate.debate_style && debate.debate_style !== "standard" ? ` · <span class="pill">${esc(debate.debate_style)}</span>` : ""}
           </div>
@@ -1693,7 +1700,8 @@
             <button class="secondary" onclick="openHandoffPreview('${esc(debate.debate_id || "")}', null)">Handoff</button>
           </div>
         </div>
-      `).join("");
+      `;
+      }).join("");
     }
 
     function renderDebateArtifacts(files = []) {
@@ -2605,6 +2613,8 @@
         state.executionsByDebateId = executionMap;
         renderDebates(payload.debates || []);
         statusEl.textContent = `Loaded ${payload.count || 0} debate(s).`;
+        const hasRunning = (payload.debates || []).some(d => d.status === "pending" || d.status === "running");
+        if (hasRunning) startDebatePoller(); else stopDebatePoller();
       } catch (error) {
         state.executionsByDebateId = {};
         renderDebates([]);
@@ -2616,6 +2626,19 @@
         if (refreshBtn) refreshBtn.disabled = false;
         renderDebates(state.debates || []);
       }
+    }
+
+    function startDebatePoller() {
+      if (state.debatePoller) return;
+      state.debatePoller = setInterval(async () => {
+        await loadDebates();
+      }, 2500);
+    }
+
+    function stopDebatePoller() {
+      if (!state.debatePoller) return;
+      clearInterval(state.debatePoller);
+      state.debatePoller = null;
     }
 
     function toggleContextOverridePanel(debateId) {
@@ -3035,9 +3058,9 @@
         document.getElementById("debateBottlenecks").value = "";
         document.getElementById("debateFilePicker").value = "";
         updateDebateFileSummary();
-        statusEl.textContent = `Debate completed: ${payload.debate?.debate_id || "unknown"}`;
+        statusEl.textContent = `Debate started: ${payload.debate?.debate_id || "unknown"} · running...`;
         await loadDebates();
-        showToast("Debate completed.");
+        showToast("Debate started — rounds will appear as they complete.");
       } catch (error) {
         const message = parseError(error);
         statusEl.textContent = `Debate error: ${message}`;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from workspace_ai.workspace_memory.session_store import SessionStore
 from workspace_ai.workspace_runtime.debate_service import DebateService
 from workspace_ai.workspace_runtime.settings_service import SettingsService
+from workspace_ai.workspace_runtime.stream_manager import StreamManager
 
 
 class _MockProvider:
@@ -99,7 +101,7 @@ def test_debate_service_marks_failed_when_all_participants_error(monkeypatch, is
 
     monkeypatch.setattr("workspace_ai.workspace_runtime.debate_service.get_provider", fake_get_provider)
 
-    result = service.start_debate(project_id="forge", topic="All providers fail", max_rounds=2)
+    result = service.start_debate(project_id="forge", topic="All providers fail", max_rounds=2, _sync=True)
     debate = result["debate"]
     assert result["status"] == "ok"
     assert debate["status"] == "failed"
@@ -126,6 +128,7 @@ def test_debate_service_continues_when_one_provider_errors(monkeypatch, isolated
             {"provider": "xai", "model": "test-model"},
         ],
         max_rounds=1,
+        _sync=True,
     )
     debate = result["debate"]
     assert result["status"] == "ok"
@@ -158,6 +161,7 @@ def test_debate_service_normalizes_structured_rounds_and_final_plan(monkeypatch,
         participants=[{"provider": "openai", "model": "test-model"}],
         max_rounds=2,
         judge_provider="xai",
+        _sync=True,
     )
 
     debate = result["debate"]
@@ -200,6 +204,7 @@ def test_debate_service_includes_local_artifact_previews(monkeypatch, isolated_w
         participants=[{"provider": "openai", "model": "test-model"}],
         judge_provider="xai",
         max_rounds=1,
+        _sync=True,
     )
 
     debate = result["debate"]
@@ -246,6 +251,7 @@ def test_debate_service_accepts_prebuilt_artifact_payloads(monkeypatch, isolated
         participants=[{"provider": "openai", "model": "test-model"}],
         judge_provider="xai",
         max_rounds=1,
+        _sync=True,
     )
 
     debate = result["debate"]
@@ -253,3 +259,90 @@ def test_debate_service_accepts_prebuilt_artifact_payloads(monkeypatch, isolated
     assert debate["files"][0]["preview"] == "Uploaded from the browser picker."
     assert prompts
     assert "Preview: Uploaded from the browser picker." in prompts[0]
+
+
+# ── async execution tests ──────────────────────────────────────────────────────
+
+def _wait_terminal(store, debate_id, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        d = store.get_debate(debate_id)
+        if d and d.get("status") not in {"pending", "running"}:
+            return d
+        time.sleep(0.02)
+    return store.get_debate(debate_id)
+
+
+def test_start_debate_returns_running_immediately(monkeypatch, isolated_workspace_env):
+    """start_debate returns {status: running} before background thread finishes."""
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    settings_service = SettingsService(store=store)
+    stream_manager = StreamManager()
+    service = DebateService(store=store, settings_service=settings_service, stream_manager=stream_manager)
+
+    def fake_get_provider(provider_name, *, api_key=None, model=None):
+        return _MockProvider(provider_name=provider_name, content='{"proposal":"p","rationale":"r","risks":[],"confidence":0.5,"agreed":true}')
+
+    monkeypatch.setattr("workspace_ai.workspace_runtime.debate_service.get_provider", fake_get_provider)
+
+    result = service.start_debate(project_id="forge", topic="Async test", max_rounds=1)
+    assert result["status"] == "running"
+    assert result["debate"]["debate_id"]
+
+
+def test_start_debate_background_thread_completes(monkeypatch, isolated_workspace_env):
+    """Background thread eventually sets debate status to completed or max_rounds."""
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    settings_service = SettingsService(store=store)
+    stream_manager = StreamManager()
+    service = DebateService(store=store, settings_service=settings_service, stream_manager=stream_manager)
+
+    def fake_get_provider(provider_name, *, api_key=None, model=None):
+        return _MockProvider(provider_name=provider_name, content='{"proposal":"p","rationale":"r","risks":[],"confidence":0.5,"agreed":false}')
+
+    monkeypatch.setattr("workspace_ai.workspace_runtime.debate_service.get_provider", fake_get_provider)
+
+    result = service.start_debate(project_id="forge", topic="Background complete test", max_rounds=1)
+    debate_id = result["debate"]["debate_id"]
+
+    debate = _wait_terminal(store, debate_id)
+    assert debate["status"] in {"completed", "max_rounds", "failed"}
+    assert len(debate["rounds"]) >= 1
+
+
+def test_start_debate_publishes_round_events(monkeypatch, isolated_workspace_env):
+    """stream_manager receives round_complete and completed events from the background thread."""
+    store = SessionStore(db_path=str(isolated_workspace_env))
+    settings_service = SettingsService(store=store)
+    stream_manager = StreamManager()
+    service = DebateService(store=store, settings_service=settings_service, stream_manager=stream_manager)
+
+    def fake_get_provider(provider_name, *, api_key=None, model=None):
+        return _MockProvider(provider_name=provider_name, content='{"proposal":"p","rationale":"r","risks":[],"confidence":0.5,"agreed":false}')
+
+    monkeypatch.setattr("workspace_ai.workspace_runtime.debate_service.get_provider", fake_get_provider)
+
+    result = service.start_debate(project_id="forge", topic="Event publish test", max_rounds=1)
+    debate_id = result["debate"]["debate_id"]
+    _wait_terminal(store, debate_id)
+
+    all_events = stream_manager.list_events(limit=50)["events"]
+    event_types = {e["event_type"] for e in all_events}
+    assert "workspace.debate.round_complete" in event_types
+    assert "workspace.debate.completed" in event_types
+    round_event = next(e for e in all_events if e["event_type"] == "workspace.debate.round_complete")
+    assert round_event["payload"]["debate_id"] == debate_id
+
+
+def test_start_debate_sync_flag_bypasses_thread(monkeypatch, isolated_workspace_env):
+    """_sync=True runs synchronously and returns status 'ok' with final debate."""
+    service = _debate_service(isolated_workspace_env)
+
+    def fake_get_provider(provider_name, *, api_key=None, model=None):
+        return _MockProvider(provider_name=provider_name, content='{"proposal":"p","rationale":"r","risks":[],"confidence":0.5,"agreed":false}')
+
+    monkeypatch.setattr("workspace_ai.workspace_runtime.debate_service.get_provider", fake_get_provider)
+
+    result = service.start_debate(project_id="forge", topic="Sync flag test", max_rounds=1, _sync=True)
+    assert result["status"] == "ok"
+    assert result["debate"]["status"] in {"completed", "max_rounds", "failed"}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, Dict, List
 
 from workspace_ai.providers import get_provider
@@ -9,6 +10,7 @@ from workspace_ai.workspace_memory.session_store import SessionStore
 from workspace_ai.workspace_runtime.chat_service import ChatService
 from workspace_ai.workspace_runtime.context_import_service import ContextImportService
 from workspace_ai.workspace_runtime.settings_service import SettingsService
+from workspace_ai.workspace_runtime.stream_manager import StreamManager
 
 
 _VALID_STYLES = {"standard", "fast", "harsh_reviewer", "side_by_side"}
@@ -31,12 +33,13 @@ _STYLE_CONFIGS: Dict[str, str] = {
 
 
 class DebateService:
-    def __init__(self, *, store: SessionStore, settings_service: SettingsService, max_rounds: int = 5) -> None:
+    def __init__(self, *, store: SessionStore, settings_service: SettingsService, max_rounds: int = 5, stream_manager: StreamManager | None = None) -> None:
         self.store = store
         self.settings_service = settings_service
         self.max_rounds = max(1, int(max_rounds))
         self.artifact_service = ArtifactService()
         self.context_import_service = ContextImportService(store=store)
+        self.stream_manager = stream_manager
 
     @staticmethod
     def _normalize_provider(value: str | None, *, field_name: str) -> str:
@@ -74,6 +77,7 @@ class DebateService:
         judge_provider: str | None = None,
         debate_style: str | None = None,
         context_import_ids: List[str] | None = None,
+        _sync: bool = False,
     ) -> Dict[str, Any]:
         active_participants = self._normalize_participants(participants)
         bounded_rounds = max(1, min(20, int(max_rounds)))
@@ -93,7 +97,27 @@ class DebateService:
             debate_style=resolved_style,
             context_import_ids=resolved_import_ids,
         )
-        return self.run_debate(debate_id=str(debate["debate_id"]), max_rounds=int(debate.get("max_rounds") or max_rounds))
+        debate_id = str(debate["debate_id"])
+        effective_rounds = int(debate.get("max_rounds") or max_rounds)
+        if _sync:
+            return self.run_debate(debate_id=debate_id, max_rounds=effective_rounds)
+        t = threading.Thread(
+            target=self._run_debate_background,
+            args=(debate_id, effective_rounds),
+            daemon=True,
+        )
+        t.start()
+        return {"status": "running", "debate": debate}
+
+    def _run_debate_background(self, debate_id: str, max_rounds: int) -> None:
+        try:
+            self.run_debate(debate_id=debate_id, max_rounds=max_rounds)
+        except Exception as exc:  # noqa: BLE001
+            if self.stream_manager:
+                self.stream_manager.publish(
+                    event_type="workspace.debate.failed",
+                    payload={"debate_id": debate_id, "error": str(exc)},
+                )
 
     def _resolve_context_import_ids(self, *, project_id: str, import_ids: List[str] | None) -> List[str]:
         if not import_ids:
@@ -157,6 +181,17 @@ class DebateService:
                     participant_model=str(response.get("model") or selected_model or ""),
                     response=response,
                 )
+                if self.stream_manager:
+                    self.stream_manager.publish(
+                        event_type="workspace.debate.round_complete",
+                        payload={
+                            "debate_id": debate_id,
+                            "round_index": round_index,
+                            "provider": provider_name,
+                            "agreed": bool((response.get("structured") or {}).get("agreed")),
+                            "mode": str(response.get("mode") or ""),
+                        },
+                    )
                 content = str(response.get("content") or "").strip()
                 history.append({"role": "assistant", "content": content})
                 if str(response.get("mode") or "") != "error":
@@ -165,6 +200,11 @@ class DebateService:
                 if bool(structured.get("agreed")) and str(response.get("mode") or "") != "error":
                     final = self._judge_summary(debate=debate, history=history)
                     finalized = self.store.finalize_debate(debate_id=debate_id, final_plan=final, status="completed")
+                    if self.stream_manager:
+                        self.stream_manager.publish(
+                            event_type="workspace.debate.completed",
+                            payload={"debate_id": debate_id, "status": "completed"},
+                        )
                     return {"status": "ok", "debate": finalized}
         if successful_responses == 0:
             final = {
@@ -183,11 +223,21 @@ class DebateService:
                 },
             }
             finalized = self.store.finalize_debate(debate_id=debate_id, final_plan=final, status="failed")
+            if self.stream_manager:
+                self.stream_manager.publish(
+                    event_type="workspace.debate.completed",
+                    payload={"debate_id": debate_id, "status": "failed"},
+                )
             return {"status": "ok", "debate": finalized}
         final = self._judge_summary(debate=debate, history=history)
         if provider_errors:
             final["warnings"] = provider_errors
         finalized = self.store.finalize_debate(debate_id=debate_id, final_plan=final, status="max_rounds")
+        if self.stream_manager:
+            self.stream_manager.publish(
+                event_type="workspace.debate.completed",
+                payload={"debate_id": debate_id, "status": "max_rounds"},
+            )
         return {"status": "ok", "debate": finalized}
 
     def get_debate(self, *, debate_id: str) -> Dict[str, Any]:

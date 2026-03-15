@@ -27,7 +27,7 @@ class SessionManager:
         self.chat_service = ChatService()
         self.stream_manager = StreamManager()
         self.settings_service = SettingsService(store=self.store)
-        self.debate_service = DebateService(store=self.store, settings_service=self.settings_service)
+        self.debate_service = DebateService(store=self.store, settings_service=self.settings_service, stream_manager=self.stream_manager)
         self.context_import_service = ContextImportService(store=self.store)
         self.context_pack_preset_service = ContextPackPresetService(store=self.store)
         self.executor_service = ExecutorService(store=self.store)
@@ -174,9 +174,9 @@ class SessionManager:
         debate = result.get("debate")
         if isinstance(debate, dict):
             self.stream_manager.publish(
-                event_type="workspace.debate.completed",
+                event_type="workspace.debate.started",
                 session_id=None,
-                payload={"debate": debate},
+                payload={"debate_id": debate.get("debate_id"), "topic": debate.get("topic")},
             )
         return result
 

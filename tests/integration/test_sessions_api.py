@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from workspace_ai.app.main import build_app
 from workspace_ai.workspace_runtime.debate_service import DebateService
+
+_TERMINAL_STATUSES = {"completed", "max_rounds", "failed"}
+
+
+def _wait_for_debate(client: TestClient, debate_id: str, timeout: float = 3.0) -> dict:
+    """Poll GET /debates/{id} until the debate reaches a terminal status."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        resp = client.get(f"/workspace/debates/{debate_id}")
+        if resp.status_code == 200:
+            debate = resp.json().get("debate", {})
+            if debate.get("status") in _TERMINAL_STATUSES:
+                return debate
+        time.sleep(0.02)
+    resp = client.get(f"/workspace/debates/{debate_id}")
+    return resp.json().get("debate", {})
 
 
 def test_session_create_list_delete_and_meta(monkeypatch, isolated_workspace_env):
@@ -74,13 +91,15 @@ def test_debate_start_and_fetch(monkeypatch, isolated_workspace_env):
     )
     assert create.status_code == 200
     payload = create.json()
-    assert payload["status"] == "ok"
+    assert payload["status"] in {"running", "ok"}
     debate_id = payload["debate"]["debate_id"]
     assert payload["debate"]["max_rounds"] == 4
-    assert payload["debate"]["status"] in {"completed", "max_rounds"}
-    assert len(payload["debate"]["rounds"]) >= 1
-    assert "structured" in payload["debate"]["rounds"][0]["response"]
-    assert "structured" in payload["debate"]["final_plan"]
+
+    debate = _wait_for_debate(client, debate_id)
+    assert debate["status"] in {"completed", "max_rounds"}
+    assert len(debate["rounds"]) >= 1
+    assert "structured" in debate["rounds"][0]["response"]
+    assert "structured" in debate["final_plan"]
 
     fetched = client.get(f"/workspace/debates/{debate_id}")
     assert fetched.status_code == 200
@@ -322,6 +341,7 @@ def test_execution_created_from_debate_includes_artifacts(monkeypatch, isolated_
     )
     assert debate_created.status_code == 200
     debate_id = debate_created.json()["debate"]["debate_id"]
+    _wait_for_debate(client, debate_id)
 
     execution_created = client.post(
         "/workspace/executions",
@@ -523,6 +543,7 @@ def test_execution_inherits_context_import_ids_from_debate(monkeypatch, isolated
         "context_import_ids": [import_id],
     })
     debate_id = debate_resp.json()["debate"]["debate_id"]
+    _wait_for_debate(client, debate_id)
 
     exec_resp = client.post("/workspace/executions", json={
         "project_id": "forge",
@@ -623,6 +644,7 @@ def test_handoff_from_execution(monkeypatch, isolated_workspace_env):
         "max_rounds": 1,
     })
     debate_id = debate_resp.json()["debate"]["debate_id"]
+    _wait_for_debate(client, debate_id)
 
     exec_resp = client.post("/workspace/executions", json={
         "project_id": "forge",
@@ -669,6 +691,7 @@ def test_mediation_returns_participant_tracks(monkeypatch, isolated_workspace_en
     })
     assert debate_resp.status_code == 200
     debate_id = debate_resp.json()["debate"]["debate_id"]
+    _wait_for_debate(client, debate_id)
 
     resp = client.get(f"/workspace/debates/{debate_id}/mediation")
     assert resp.status_code == 200
@@ -701,6 +724,7 @@ def test_mediation_single_participant_has_no_key_differences(monkeypatch, isolat
         "max_rounds": 1,
     })
     debate_id = debate_resp.json()["debate"]["debate_id"]
+    _wait_for_debate(client, debate_id)
 
     resp = client.get(f"/workspace/debates/{debate_id}/mediation")
     assert resp.status_code == 200
@@ -806,7 +830,8 @@ def _make_finalized_debate(client, *, project_id="forge"):
         "max_rounds": 1,
     })
     assert debate_resp.status_code == 200
-    return debate_resp.json()["debate"]
+    debate_id = debate_resp.json()["debate"]["debate_id"]
+    return _wait_for_debate(client, debate_id)
 
 
 def test_execute_from_handoff_endpoint(monkeypatch, isolated_workspace_env):
@@ -869,6 +894,7 @@ def test_execute_from_handoff_inherits_context_imports(monkeypatch, isolated_wor
         "context_import_ids": [import_id],
     })
     debate_id = debate_resp.json()["debate"]["debate_id"]
+    _wait_for_debate(client, debate_id)
 
     resp = client.post(f"/workspace/debates/{debate_id}/execute-from-handoff", json={})
     assert resp.status_code == 200
