@@ -2285,13 +2285,13 @@
               <pre style="margin-top:4px;">${esc(patchDraft)}</pre>
             </details>
           ` : ""}
-          ${executionContent ? `
+          ${executionContent && execution.status !== "completed" ? `
             <div style="margin-top:10px;">
               <strong style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">Execution Result</strong>
               <div class="debate-content">${esc(executionContent)}</div>
             </div>
           ` : ""}
-          ${resultSteps.length ? `
+          ${resultSteps.length && execution.status !== "completed" ? `
             <div class="context-list" style="margin-top:10px;">
               ${resultSteps.map(step => `
                 <div class="context-item">
@@ -2319,7 +2319,7 @@
               </button>
             ` : ""}
             <button class="secondary" onclick='copyExecutionPayload(JSON.parse(decodeURIComponent(${JSON.stringify(encodeURIComponent(JSON.stringify(execution || {})))})))'>Copy Execution</button>
-            ${executionContent ? `<button class="secondary" onclick='copyExecutionResult(decodeURIComponent(${JSON.stringify(encodeURIComponent(executionContent))}))'>Copy Result</button>` : ""}
+            ${executionContent && execution.status !== "completed" ? `<button class="secondary" onclick='copyExecutionResult(decodeURIComponent(${JSON.stringify(encodeURIComponent(executionContent))}))'>Copy Result</button>` : ""}
             <button class="secondary" onclick="openExecutionExport('${esc(execution.execution_id || "")}')">Export</button>
             <button class="secondary" onclick="openHandoffPreview(null, '${esc(execution.execution_id || "")}')">Handoff</button>
           </div>
