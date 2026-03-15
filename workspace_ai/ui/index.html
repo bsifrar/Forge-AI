@@ -2275,13 +2275,15 @@
             </div>
           ` : ""}
           ${patchDraft ? `
-            <div style="margin-top:10px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px;">
-                <strong style="display:block; font-size:12px; color:var(--muted);">Patch Draft</strong>
-                <button class="secondary" onclick='copyText(decodeURIComponent(${JSON.stringify(encodeURIComponent(patchDraft))}), "Patch draft copied.")'>Copy Patch Draft</button>
+            <details style="margin-top:10px;">
+              <summary style="cursor:pointer; font-size:12px; font-weight:600; color:var(--muted); user-select:none;">
+                Patch Draft (${patchDraft.split('\n').length} lines)
+              </summary>
+              <div style="display:flex; justify-content:flex-end; margin-top:6px;">
+                <button class="secondary" onclick='event.stopPropagation(); copyText(decodeURIComponent(${JSON.stringify(encodeURIComponent(patchDraft))}), "Patch draft copied.")' style="padding:2px 7px; font-size:10px;">Copy Patch Draft</button>
               </div>
-              <pre>${esc(patchDraft)}</pre>
-            </div>
+              <pre style="margin-top:4px;">${esc(patchDraft)}</pre>
+            </details>
           ` : ""}
           ${executionContent ? `
             <div style="margin-top:10px;">
