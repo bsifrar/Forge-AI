@@ -929,7 +929,7 @@
             <span id="sessionCount" class="pill">0</span>
           </div>
           <div class="create-row" style="margin-bottom: 12px;">
-            <input id="projectId" value="workspace" placeholder="Project ID" />
+            <input id="projectId" value="forge" placeholder="Project ID" onchange="setActiveProject(this.value.trim())" />
             <input id="sessionTitle" placeholder="Session title" />
             <button onclick="createSession()">Create Session</button>
           </div>
@@ -951,7 +951,7 @@
           <h2>Import ChatGPT</h2>
           <div class="create-row">
             <div class="field-label">Project</div>
-            <input id="importProjectId" value="workspace" placeholder="Project ID" />
+            <input id="importProjectId" value="forge" placeholder="Project ID" onchange="setActiveProject(this.value.trim())" />
             <div class="field-label">Chat export file</div>
             <input id="importFile" type="file" accept=".json,application/json" multiple />
             <div class="help-text">Choose one or more `conversations-*.json` files from your ChatGPT export folder. Start with `conversations-000.json`, or select all of them at once.</div>
@@ -987,7 +987,7 @@
             <span id="debateCount" class="pill">0</span>
           </div>
           <div class="create-row">
-            <input id="debateProjectId" value="forge" placeholder="Project ID" />
+            <input id="debateProjectId" value="forge" placeholder="Project ID" onchange="setActiveProject(this.value.trim())" />
             <input id="debateTopic" placeholder="Debate topic" />
             <textarea id="debateBottlenecks" placeholder="Current bottlenecks or constraints..."></textarea>
             <div class="field-label">Artifacts</div>
@@ -1029,8 +1029,16 @@
         </div>
         <div class="panel">
           <div class="toolbar">
-            <h2>Recent Debates</h2>
+            <div>
+              <h2 style="margin-bottom:1px;">Recent Debates</h2>
+              <span id="debateProjectBadge" class="muted" style="font-size:11px;">Project: forge</span>
+            </div>
             <button id="refreshDebatesBtn" class="secondary" onclick="loadDebates()">Refresh</button>
+          </div>
+          <div class="search-row" style="margin-bottom:8px;">
+            <input id="debateSearch" placeholder="Filter by topic, status, style, ID, execution status…" oninput="setDebateFilter(this.value)" />
+            <button class="secondary" onclick="clearDebateFilter()">Clear</button>
+            <span id="debateFilterCount" class="pill" style="display:none;"></span>
           </div>
           <div id="debates" class="debate-list"></div>
         </div>
@@ -1042,7 +1050,7 @@
             <button class="secondary" onclick="loadDashboard()">Refresh</button>
           </div>
           <div class="create-row" style="flex-direction:row; gap:6px; align-items:center;">
-            <input id="dashboardProjectId" value="forge" placeholder="Project ID" style="flex:1;" />
+            <input id="dashboardProjectId" value="forge" placeholder="Project ID" style="flex:1;" onchange="setActiveProject(this.value.trim())" />
             <button class="secondary" style="padding:6px 12px; white-space:nowrap;" onclick="loadDashboard()">Load</button>
           </div>
           <p id="dashboardStatus" class="help-text" style="margin-top:6px;">Enter a project ID and click Load.</p>
@@ -1244,6 +1252,8 @@
       dashboardPayload: null,        // cached dashboard API response for re-filtering
       dashboardDebateFilter: "",     // active status filter for recent debates ("" = all)
       dashboardExecutionFilter: "",  // active status filter for recent executions ("" = all)
+      activeProjectId: "forge",      // shared project scope — all project inputs stay in sync
+      debateFilter: "",              // client-side debate search/filter string
     };
 
     function draftStorageKey(sessionId) {
@@ -1429,19 +1439,64 @@
       return String(error.message || error).replace(/^Error:\s*/, "");
     }
 
+    function setActiveProject(id) {
+      const trimmed = (id || "").trim() || "forge";
+      state.activeProjectId = trimmed;
+      localStorage.setItem("workspace.activeProjectId", trimmed);
+      // Sync all project inputs to the new value
+      for (const elId of ["projectId", "importProjectId", "debateProjectId", "dashboardProjectId"]) {
+        const el = document.getElementById(elId);
+        if (el && el.value !== trimmed) el.value = trimmed;
+      }
+      const badge = document.getElementById("debateProjectBadge");
+      if (badge) badge.textContent = `Project: ${trimmed}`;
+    }
+
+    // ── Debate client-side search ──────────────────────────────────────────
+
+    function matchesDebateFilter(debate, query) {
+      // Pure: mirrors tests/unit/test_debate_search.py::matches_debate_filter
+      if (!query) return true;
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      const fields = [
+        debate.topic || "",
+        debate.debate_id || "",
+        debate.status || "",
+        debate.debate_style || "",
+        debate.project_id || "",
+      ];
+      const exec = state.executionsByDebateId[debate.debate_id || ""];
+      if (exec) fields.push(exec.status || "");
+      return fields.some(f => f.toLowerCase().includes(q));
+    }
+
+    function setDebateFilter(val) {
+      state.debateFilter = val || "";
+      renderDebates(state.debates || []);
+    }
+
+    function clearDebateFilter() {
+      state.debateFilter = "";
+      const searchEl = document.getElementById("debateSearch");
+      if (searchEl) searchEl.value = "";
+      renderDebates(state.debates || []);
+    }
+    // ── End debate search ──────────────────────────────────────────────────
+
     function persistUIState() {
       localStorage.setItem("workspace.sidebarTab", state.sidebarTab || "control");
-      localStorage.setItem("workspace.projectId", document.getElementById("projectId")?.value || "workspace");
-      localStorage.setItem("workspace.importProjectId", document.getElementById("importProjectId")?.value || "workspace");
+      localStorage.setItem("workspace.activeProjectId", state.activeProjectId || "forge");
       if (state.sessionId) localStorage.setItem("workspace.lastSessionId", state.sessionId);
     }
 
     function restoreUIState() {
       const sidebarTab = localStorage.getItem("workspace.sidebarTab");
-      const projectId = localStorage.getItem("workspace.projectId");
-      const importProjectId = localStorage.getItem("workspace.importProjectId");
-      if (projectId) document.getElementById("projectId").value = projectId;
-      if (importProjectId) document.getElementById("importProjectId").value = importProjectId;
+      const activeProjectId = localStorage.getItem("workspace.activeProjectId")
+        // legacy fallback: use debateProjectId or projectId if activeProjectId not yet stored
+        || localStorage.getItem("workspace.projectId")
+        || "forge";
+      setActiveProject(activeProjectId);
       if (sidebarTab) setSidebarTab(sidebarTab);
     }
 
@@ -1821,7 +1876,23 @@
         root.innerHTML = `<div class="muted">No debates yet.</div>`;
         return;
       }
-      root.innerHTML = debates.map(debate => {
+      // Apply client-side filter
+      const filter = state.debateFilter || "";
+      const filtered = filter ? debates.filter(d => matchesDebateFilter(d, filter)) : debates;
+      const countEl = document.getElementById("debateFilterCount");
+      if (countEl) {
+        if (filter) {
+          countEl.textContent = `${filtered.length} / ${debates.length}`;
+          countEl.style.display = "";
+        } else {
+          countEl.style.display = "none";
+        }
+      }
+      if (!filtered.length) {
+        root.innerHTML = `<div class="muted">No debates match "${esc(filter)}".</div>`;
+        return;
+      }
+      root.innerHTML = filtered.map(debate => {
         const isRunning = debate.status === "pending" || debate.status === "running";
         return `
         <div class="debate-card" data-debate-id="${esc(debate.debate_id || "")}" id="debate-card-${esc(debate.debate_id || "")}">
@@ -2893,6 +2964,8 @@
       const statusEl = document.getElementById("debateStatus");
       const refreshBtn = document.getElementById("refreshDebatesBtn");
       const projectId = document.getElementById("debateProjectId").value.trim() || "forge";
+      // Keep shared active project in sync with whatever was in the debates field
+      if (projectId !== state.activeProjectId) setActiveProject(projectId);
       state.debatesLoading = true;
       if (refreshBtn) refreshBtn.disabled = true;
       statusEl.textContent = "Loading debates...";
