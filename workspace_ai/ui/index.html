@@ -523,9 +523,13 @@
       border-radius: 10px;
       padding: 12px;
       background: var(--surface-1);
-      transition: border-color 120ms ease;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
     }
     .debate-card:hover { border-color: var(--border-mid); }
+    .debate-card--highlight {
+      border-color: var(--accent) !important;
+      box-shadow: 0 0 0 2px rgba(124, 111, 247, 0.35);
+    }
     .debate-card h3 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
     .debate-card .meta { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
     .debate-card details { margin-top: 7px; }
@@ -1213,6 +1217,9 @@
       contextPackPresets: [],        // List of {preset_id, project_id, name, import_ids}
       debatePoller: null,            // setInterval handle while any debate is running
       executionExportText: null,     // text shown in export preview modal
+      dashboardPayload: null,        // cached dashboard API response for re-filtering
+      dashboardDebateFilter: "",     // active status filter for recent debates ("" = all)
+      dashboardExecutionFilter: "",  // active status filter for recent executions ("" = all)
     };
 
     function draftStorageKey(sessionId) {
@@ -1714,7 +1721,7 @@
       root.innerHTML = debates.map(debate => {
         const isRunning = debate.status === "pending" || debate.status === "running";
         return `
-        <div class="debate-card">
+        <div class="debate-card" data-debate-id="${esc(debate.debate_id || "")}" id="debate-card-${esc(debate.debate_id || "")}">
           <h3>${esc(debate.topic || debate.debate_id)}${isRunning ? ' <span class="pill" style="background:var(--accent-blue,#2563eb);color:#fff;animation:pulse 1.5s infinite;">running…</span>' : ""}</h3>
           <div class="meta">
             ${esc(debate.project_id || "forge")} · ${esc(debate.debate_id || "")} · ${esc(debate.status || "unknown")}${debate.debate_style && debate.debate_style !== "standard" ? ` · <span class="pill">${esc(debate.debate_style)}</span>` : ""}
@@ -2732,12 +2739,38 @@
       statusEl.textContent = "Loading…";
       try {
         const data = await api(`/workspace/projects/${encodeURIComponent(projectId)}/dashboard?recent_limit=5`);
+        state.dashboardPayload = data;
+        state.dashboardDebateFilter = "";
+        state.dashboardExecutionFilter = "";
         renderDashboard(data);
         statusEl.textContent = `Project: ${esc(data.project_id)} · updated ${new Date().toLocaleTimeString()}`;
       } catch (error) {
         statusEl.textContent = `Dashboard error: ${parseError(error)}`;
         showToast(`Dashboard load failed: ${parseError(error)}`, "error");
       }
+    }
+
+    function setDashboardDebateFilter(status) {
+      state.dashboardDebateFilter = state.dashboardDebateFilter === status ? "" : status;
+      if (state.dashboardPayload) renderDashboard(state.dashboardPayload);
+    }
+
+    function setDashboardExecutionFilter(status) {
+      state.dashboardExecutionFilter = state.dashboardExecutionFilter === status ? "" : status;
+      if (state.dashboardPayload) renderDashboard(state.dashboardPayload);
+    }
+
+    async function focusDebate(debateId) {
+      if (!debateId) return;
+      setSidebarTab("debates");
+      try {
+        await loadDebates();
+      } catch (_) { /* ignore */ }
+      const card = document.getElementById(`debate-card-${debateId}`);
+      if (!card) return;
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      card.classList.add("debate-card--highlight");
+      setTimeout(() => card.classList.remove("debate-card--highlight"), 2200);
     }
 
     function _statusBadge(status) {
@@ -2775,11 +2808,21 @@
 
       // Recent debates
       const recentDebatesEl = document.getElementById("dashboardRecentDebates");
-      const debates = data.recent_debates || [];
-      if (!debates.length) {
+      const debateFilterStatuses = ["running", "pending", "completed", "max_rounds", "failed"];
+      const activeDebateFilter = state.dashboardDebateFilter || "";
+      const allDebates = data.recent_debates || [];
+      const filteredDebates = activeDebateFilter ? allDebates.filter(d => d.status === activeDebateFilter) : allDebates;
+      const debateFilterPills = debateFilterStatuses.map(s => {
+        const active = activeDebateFilter === s;
+        return `<button class="secondary${active ? " active" : ""}" style="padding:2px 8px; font-size:10px; border-radius:999px;${active ? " background:var(--accent);color:#fff;border-color:var(--accent);" : ""}" onclick="setDashboardDebateFilter('${s}')">${s}</button>`;
+      }).join("");
+      const debateFilterRow = `<div style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px;"><button class="secondary${!activeDebateFilter ? " active" : ""}" style="padding:2px 8px; font-size:10px; border-radius:999px;${!activeDebateFilter ? " background:var(--accent);color:#fff;border-color:var(--accent);" : ""}" onclick="setDashboardDebateFilter('')">All</button>${debateFilterPills}</div>`;
+      if (!allDebates.length) {
         recentDebatesEl.innerHTML = `<div class="muted">No debates in this project.</div>`;
+      } else if (!filteredDebates.length) {
+        recentDebatesEl.innerHTML = debateFilterRow + `<div class="muted">No debates match this filter.</div>`;
       } else {
-        recentDebatesEl.innerHTML = debates.map(d => `
+        recentDebatesEl.innerHTML = debateFilterRow + filteredDebates.map(d => `
           <div class="context-item" style="margin-bottom:6px;">
             <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:6px;">
               <div style="flex:1; min-width:0;">
@@ -2788,7 +2831,7 @@
                 <div class="muted" style="font-size:10px; margin-top:2px;">${esc((d.updated_at || "").replace("T", " ").slice(0, 16))}</div>
               </div>
               <div style="display:flex; flex-direction:column; gap:3px; flex-shrink:0;">
-                <button class="secondary" style="padding:2px 7px; font-size:10px;" onclick="setSidebarTab('debates')">View</button>
+                <button class="secondary" style="padding:2px 7px; font-size:10px;" onclick="focusDebate('${esc(d.debate_id)}')">View</button>
                 <button class="secondary" style="padding:2px 7px; font-size:10px;" onclick="openHandoffPreview('${esc(d.debate_id)}', null)">Handoff</button>
               </div>
             </div>
@@ -2798,11 +2841,21 @@
 
       // Recent executions
       const recentExecEl = document.getElementById("dashboardRecentExecutions");
-      const executions = data.recent_executions || [];
-      if (!executions.length) {
+      const execFilterStatuses = ["pending_approval", "completed", "rejected"];
+      const activeExecFilter = state.dashboardExecutionFilter || "";
+      const allExecutions = data.recent_executions || [];
+      const filteredExecutions = activeExecFilter ? allExecutions.filter(e => e.status === activeExecFilter) : allExecutions;
+      const execFilterPills = execFilterStatuses.map(s => {
+        const active = activeExecFilter === s;
+        return `<button class="secondary${active ? " active" : ""}" style="padding:2px 8px; font-size:10px; border-radius:999px;${active ? " background:var(--accent);color:#fff;border-color:var(--accent);" : ""}" onclick="setDashboardExecutionFilter('${s}')">${s}</button>`;
+      }).join("");
+      const execFilterRow = `<div style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px;"><button class="secondary${!activeExecFilter ? " active" : ""}" style="padding:2px 8px; font-size:10px; border-radius:999px;${!activeExecFilter ? " background:var(--accent);color:#fff;border-color:var(--accent);" : ""}" onclick="setDashboardExecutionFilter('')">All</button>${execFilterPills}</div>`;
+      if (!allExecutions.length) {
         recentExecEl.innerHTML = `<div class="muted">No executions in this project.</div>`;
+      } else if (!filteredExecutions.length) {
+        recentExecEl.innerHTML = execFilterRow + `<div class="muted">No executions match this filter.</div>`;
       } else {
-        recentExecEl.innerHTML = executions.map(e => `
+        recentExecEl.innerHTML = execFilterRow + filteredExecutions.map(e => `
           <div class="context-item" style="margin-bottom:6px;">
             <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:6px;">
               <div style="flex:1; min-width:0;">
